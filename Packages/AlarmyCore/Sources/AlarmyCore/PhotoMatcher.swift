@@ -38,9 +38,11 @@ public struct PhotoMatcher {
         return (d <= threshold, d, threshold)
     }
 
-    /// Provisional values; calibrated from `testCalibrationReport`.
+    /// Calibrated from `testCalibrationReport` on CI (Revision1, synthetic scenes):
+    /// same scene 3.05–8.73 (dimmed to 60–80%, shifted 2–4%), different scenes 12.96–16.27.
+    /// Medium is the midpoint; tune on the device with real photos.
     public static func threshold(for strictness: Strictness) -> Float {
-        let medium: Float = 15
+        let medium: Float = 10.8
         switch strictness {
         case .loose: return medium * 1.3
         case .medium: return medium
