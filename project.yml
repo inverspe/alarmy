@@ -1,0 +1,28 @@
+name: Alarmy
+options:
+  deploymentTarget: { iOS: "16.0" }
+packages:
+  AlarmyCore: { path: Packages/AlarmyCore }
+targets:
+  Alarmy:
+    type: application
+    platform: iOS
+    sources: [App]
+    dependencies: [{ package: AlarmyCore }]
+    scheme: {}
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.inverspe.alarmy
+      MARKETING_VERSION: "0.1"
+      CURRENT_PROJECT_VERSION: "1"
+      TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Alarmy
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIBackgroundModes: [audio]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSCameraUsageDescription: "Alarmy photographs your registered objects to turn off the alarm."
+        UIRequiresFullScreen: true
