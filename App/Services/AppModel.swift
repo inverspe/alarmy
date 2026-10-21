@@ -45,6 +45,11 @@ final class AppModel: ObservableObject {
         notifications.onTap = { [weak self] in self?.tick() }
         UNUserNotificationCenter.current().delegate = notifications
 
+        let notifications = self.notifications
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        DiagnosticLog.shared.add("launch build \(build)")
+        Task { await notifications.logPermissions("at launch") }
+
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }

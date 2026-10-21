@@ -11,9 +11,8 @@ struct OnboardingView: View {
     @State private var criticalOK = false
     @State private var cameraOK = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
     @State private var addingObject = false
-    @State private var guardResult: String?
 
-    private let lastStep = 5
+    private let lastStep = 4
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -93,18 +92,6 @@ struct OnboardingView: View {
             numbered(1, "Settings → Screen Time → Use Screen Time Passcode. Let a friend type it, or pick a random one and hide it somewhere annoying.")
             numbered(2, "Settings → Screen Time → Content & Privacy Restrictions → turn it on → iTunes & App Store Purchases → Deleting Apps → Don't Allow.")
             numbered(3, "Settings → Screen Time → App Limits → Add Limit → TrollStore → 1 minute → Block at End of Limit on. TrollStore can uninstall apps too.")
-        case 4:
-            title("Extra protection")
-            paragraph("Optional. Asks Screen Time to block deleting Alarmy directly. It may not work with TrollStore, and that's fine: the steps before cover it.")
-            PrimaryButton(title: "Try it", background: Theme.nightSurface, foreground: Theme.moon) {
-                Task {
-                    switch await AppRemovalGuard.tryEnable() {
-                    case .success: guardResult = "On. Alarmy can't be deleted."
-                    case .failure: guardResult = "Not available on this setup. That's fine, the Screen Time steps cover it."
-                    }
-                }
-            }
-            if let guardResult { Text(guardResult).font(Theme.bodyStrong).foregroundColor(Theme.sunlight) }
         default:
             title("Keep it working")
             paragraph("Don't update iOS. TrollStore apps can stop opening after an update, and then the alarm can't ring.")

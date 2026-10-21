@@ -11,11 +11,42 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
     var isRingingInForeground: @MainActor () -> Bool = { false }
 
     func requestAuthorization() async -> Bool {
-        (try? await center.requestAuthorization(options: [.alert, .sound, .criticalAlert])) ?? false
+        do {
+            let granted = try await center.requestAuthorization(options: [.alert, .sound, .criticalAlert])
+            DiagnosticLog.shared.add("notification request granted=\(granted)")
+            await logPermissions("after request")
+            return granted
+        } catch {
+            DiagnosticLog.shared.add("notification request failed: \((error as NSError).code) \(error.localizedDescription)")
+            return false
+        }
     }
 
     func criticalAlertsEnabled() async -> Bool {
         await center.notificationSettings().criticalAlertSetting == .enabled
+    }
+
+    /// Writes what iOS reports about this app's notification permissions to the log.
+    func logPermissions(_ context: String) async {
+        let s = await center.notificationSettings()
+        func name(_ setting: UNNotificationSetting) -> String {
+            switch setting {
+            case .enabled: return "on"
+            case .disabled: return "off"
+            case .notSupported: return "notSupported"
+            @unknown default: return "unknown"
+            }
+        }
+        let status: String
+        switch s.authorizationStatus {
+        case .authorized: status = "authorized"
+        case .denied: status = "denied"
+        case .notDetermined: status = "notDetermined"
+        case .provisional: status = "provisional"
+        case .ephemeral: status = "ephemeral"
+        @unknown default: status = "unknown"
+        }
+        DiagnosticLog.shared.add("notifications \(context): status=\(status) alert=\(name(s.alertSetting)) sound=\(name(s.soundSetting)) critical=\(name(s.criticalAlertSetting))")
     }
 
     /// Replaces every pending request with `plan`. No-op when the plan hasn't changed.

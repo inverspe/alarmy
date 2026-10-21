@@ -4,8 +4,6 @@
 <dict>
 	<key>application-identifier</key>
 	<string>com.inverspe.alarmy</string>
-	<key>com.apple.developer.family-controls</key>
-	<true/>
 	<key>com.apple.developer.usernotifications.critical-alerts</key>
 	<true/>
 </dict>
