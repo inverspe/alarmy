@@ -23,6 +23,8 @@ struct RootView: View {
     var body: some View {
         if let session = model.state.ringSession, session.phase != .finished {
             MorningFlowView()
+        } else if !model.state.onboardingDone {
+            OnboardingView()
         } else {
             tabs
         }
@@ -33,7 +35,6 @@ struct RootView: View {
             AlarmListView().tabItem { Label("Alarms", systemImage: "alarm") }
             ObjectsView().tabItem { Label("Objects", systemImage: "camera") }
             SettingsView().tabItem { Label("Settings", systemImage: "gearshape") }
-            DiagnosticsView().tabItem { Label("Diagnostics", systemImage: "stethoscope") }
         }
         .tint(Theme.sunlight)
     }

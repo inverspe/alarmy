@@ -144,6 +144,13 @@ final class AppModel: ObservableObject {
         commit(s)
     }
 
+    /// Re-shows the setup guide. Nothing in it can weaken the alarm, so the lock doesn't apply.
+    func restartOnboarding() {
+        var s = state
+        s.onboardingDone = false
+        commit(s)
+    }
+
     func startEarlyClear() {
         guard let occurrence = earlyClearable else { return }
         var s = state
