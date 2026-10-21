@@ -9,6 +9,8 @@ struct OnboardingView: View {
     @State private var step = 0
     @State private var notificationsOK = false
     @State private var criticalOK = false
+    /// iOS reports critical alerts as not supported for this install (seen under TrollStore).
+    @State private var criticalUnavailable = false
     @State private var cameraOK = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
     @State private var addingObject = false
 
@@ -45,9 +47,25 @@ struct OnboardingView: View {
         }
     }
 
+    /// Critical alerts on — or, where iOS doesn't support them for this install, plain notifications on.
+    private var notificationsDone: Bool {
+        notificationsOK && (criticalOK || criticalUnavailable)
+    }
+
+    private var notificationsDetail: String? {
+        guard notificationsOK else { return nil }
+        if criticalUnavailable {
+            return "Critical alerts aren't available on this install. Alarmy still rings through silent mode while it's running. If it gets closed, backup alerts only vibrate in silent mode. To let them through Do Not Disturb: Settings → Focus → Do Not Disturb → Apps → add Alarmy."
+        }
+        if !criticalOK {
+            return "Critical alerts are off. Turn them on in Settings → Notifications → Alarmy, or backups stay silent in silent mode."
+        }
+        return nil
+    }
+
     private var canContinue: Bool {
         switch step {
-        case 1: return notificationsOK && criticalOK && cameraOK
+        case 1: return notificationsDone && cameraOK
         case 2: return !model.state.objects.isEmpty
         default: return true
         }
@@ -62,7 +80,7 @@ struct OnboardingView: View {
         case 1:
             title("Two permissions")
             paragraph("Notifications ring through silent mode and Do Not Disturb if the app gets closed. The camera is how you turn the alarm off.")
-            permissionRow("Notifications", done: notificationsOK && criticalOK, detail: notificationsOK && !criticalOK ? "Critical alerts are off. Turn them on in Settings → Notifications → Alarmy, or backups stay silent in silent mode." : nil) {
+            permissionRow("Notifications", done: notificationsDone, detail: notificationsDetail) {
                 Task {
                     _ = await model.requestNotificationPermission()
                     await refreshNotificationStatus()
@@ -73,7 +91,7 @@ struct OnboardingView: View {
                     cameraOK = await AVCaptureDevice.requestAccess(for: .video)
                 }
             }
-            if !(notificationsOK && criticalOK && cameraOK) {
+            if !(notificationsDone && cameraOK) || criticalUnavailable {
                 Button("Open Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                 }
@@ -141,5 +159,6 @@ struct OnboardingView: View {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         notificationsOK = settings.authorizationStatus == .authorized
         criticalOK = settings.criticalAlertSetting == .enabled
+        criticalUnavailable = notificationsOK && settings.criticalAlertSetting == .notSupported
     }
 }
