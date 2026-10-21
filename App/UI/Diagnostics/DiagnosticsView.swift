@@ -1,6 +1,7 @@
 import SwiftUI
 import UserNotifications
 import UIKit
+import AVFoundation
 import AlarmyCore
 
 /// Temporary screen for checking platform behaviour on the device.
