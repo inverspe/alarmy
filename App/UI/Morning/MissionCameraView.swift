@@ -120,7 +120,7 @@ struct MissionCameraView: View {
                 if let switchedTo {
                     toast = Toast(text: "Switched to \(switchedTo.name)", detail: detail, isMiss: false)
                 } else if let lookedLike {
-                    toast = Toast(text: "That looks more like (lookedLike.name). Find (model.currentObject?.name ?? "the right object").",
+                    toast = Toast(text: "That looks more like \(lookedLike.name). Find \(model.currentObject?.name ?? "the right object").",
                                   detail: detail, isMiss: true)
                 } else {
                     toast = Toast(text: "Not a match. Get closer and try again.", detail: detail, isMiss: true)

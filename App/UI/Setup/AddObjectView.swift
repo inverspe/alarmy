@@ -85,7 +85,7 @@ struct AddObjectView: View {
         .padding(.bottom, 16)
         .background(Theme.night.ignoresSafeArea())
         .task { await camera.start() }
-        .alert("This looks a lot like (lookalike?.name ?? "another object")",
+        .alert("This looks a lot like \(lookalike?.name ?? "another object")",
                isPresented: Binding(get: { lookalike != nil }, set: { if !$0 { lookalike = nil } })) {
             Button("Save anyway") { save(allowLookalike: true) }
             Button("Retake", role: .cancel) { shots.removeAll() }
