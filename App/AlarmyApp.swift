@@ -7,11 +7,26 @@ struct AlarmyApp: App {
 
     var body: some Scene {
         WindowGroup {
-            DiagnosticsView()
+            RootView()
                 .environmentObject(model)
+                .preferredColorScheme(.dark)
         }
         .onChange(of: scenePhase) { phase in
             if phase == .active { model.tick() }
         }
+    }
+}
+
+struct RootView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        TabView {
+            AlarmListView().tabItem { Label("Alarms", systemImage: "alarm") }
+            ObjectsView().tabItem { Label("Objects", systemImage: "camera") }
+            SettingsView().tabItem { Label("Settings", systemImage: "gearshape") }
+            DiagnosticsView().tabItem { Label("Diagnostics", systemImage: "stethoscope") }
+        }
+        .tint(Theme.sunlight)
     }
 }

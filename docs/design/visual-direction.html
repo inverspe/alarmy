@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alarmy visual direction</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --night: #1B2140;
+    --night-surface: #262E57;
+    --moon: #E8ECF8;
+    --dusk: #8B93B8;
+    --sunlight: #FFD84D;
+    --horizon: #FF9F1C;
+    --siren: #E0335C;
+    --page: #10142a;
+    --page-text: #E8ECF8;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) { --page: #EEF0F7; --page-text: #1B2140; }
+  }
+  :root[data-theme="light"] { --page: #EEF0F7; --page-text: #1B2140; }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--page-text);
+    font-family: "Archivo", system-ui, sans-serif; font-stretch: 100%;
+    padding: 40px 16px 64px;
+  }
+  .intro { max-width: 70ch; margin: 0 auto 40px; }
+  .intro h1 { font-stretch: 125%; font-weight: 800; font-size: clamp(28px, 5vw, 40px); margin: 0 0 12px; letter-spacing: -0.01em; }
+  .intro p { line-height: 1.55; margin: 0 0 10px; opacity: .85; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 40px 28px; max-width: 1040px; margin: 0 auto; }
+  figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  figcaption { max-width: 300px; font-size: 14px; line-height: 1.5; opacity: .8; }
+  figcaption strong { opacity: 1; font-weight: 700; }
+
+  .phone {
+    width: 300px; height: 620px; border-radius: 44px; overflow: hidden; position: relative;
+    box-shadow: 0 0 0 10px #05070f, 0 30px 60px -20px rgba(5, 7, 15, .6);
+    display: flex; flex-direction: column; padding: 58px 22px 28px;
+  }
+  .status { position: absolute; top: 16px; left: 30px; right: 30px; display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; }
+
+  /* Type */
+  .clock { font-stretch: 125%; font-weight: 900; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: .9; }
+  .display { font-stretch: 125%; font-weight: 800; letter-spacing: -0.01em; line-height: 1; }
+  .body { font-size: 16px; line-height: 1.4; }
+  .small { font-size: 13px; line-height: 1.4; }
+
+  /* Ringing: sunlight field */
+  .ring { background: var(--sunlight); color: var(--night); }
+  .ring .clock { font-size: 76px; }
+  .ring .lead { margin: 26px 0 4px; font-size: 17px; font-weight: 500; }
+  .ring .display { font-size: 40px; }
+  .photo {
+    border-radius: 24px; margin: 18px 0 0; flex: 1; min-height: 0;
+    background:
+      radial-gradient(circle at 62% 58%, #c9c3b4 0 18%, transparent 19%),
+      linear-gradient(180deg, #8f8a80 0 62%, #6f6a62 62% 100%);
+    position: relative;
+  }
+  .photo::after { content: "Your reference photo"; position: absolute; left: 14px; bottom: 12px; font-size: 12px; color: #fff; opacity: .85; }
+  .btn {
+    margin-top: 18px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center;
+    font-size: 19px; font-weight: 700; border: 0; width: 100%; font-family: inherit;
+  }
+  .ring .btn { background: var(--night); color: var(--sunlight); }
+
+  /* Camera */
+  .camera { background: #000; color: #fff; padding: 0; }
+  .viewfinder { position: absolute; inset: 0; background:
+      radial-gradient(circle at 48% 46%, #b9b3a6 0 16%, transparent 17%),
+      linear-gradient(180deg, #4d4a45 0 60%, #3a3834 60% 100%); }
+  .pill { position: absolute; top: 58px; left: 18px; background: var(--night); color: var(--moon); border-radius: 999px; padding: 9px 14px; font-weight: 700; font-size: 15px; }
+  .pill span { color: var(--sunlight); }
+  .ref { position: absolute; top: 52px; right: 18px; width: 78px; height: 104px; border-radius: 14px; border: 3px solid var(--sunlight);
+         background: radial-gradient(circle at 62% 58%, #c9c3b4 0 18%, transparent 19%), linear-gradient(180deg, #8f8a80 0 62%, #6f6a62 62% 100%); }
+  .controls { position: absolute; left: 0; right: 0; bottom: 34px; display: flex; align-items: center; justify-content: center; }
+  .shutter { width: 78px; height: 78px; border-radius: 50%; border: 5px solid var(--sunlight); display: grid; place-items: center; }
+  .shutter::after { content: ""; width: 60px; height: 60px; border-radius: 50%; background: #fff; }
+  .torch { position: absolute; left: 30px; width: 48px; height: 48px; border-radius: 50%; background: rgba(27, 33, 64, .8); display: grid; place-items: center; font-size: 20px; }
+  .torch.on { background: var(--sunlight); }
+  .toast { position: absolute; left: 16px; right: 16px; bottom: 136px; background: var(--siren); color: #fff; border-radius: 18px; padding: 14px 16px; }
+  .toast .body { font-weight: 700; }
+  .toast .small { opacity: .85; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+  /* Countdown: sunrise */
+  .rise { color: var(--moon); background: linear-gradient(180deg, #1B2140 0%, #3A3566 45%, #B4566A 72%, #FF9F1C 88%, #FFD84D 100%); }
+  .rise .done { font-size: 17px; font-weight: 600; color: var(--sunlight); }
+  .rise .clock { font-size: 92px; margin-top: 18px; }
+  .rise .until { margin-top: 8px; color: var(--moon); opacity: .75; }
+  .rise .stay { margin-top: 26px; font-size: 26px; }
+  .sun { position: absolute; left: 50%; width: 220px; height: 220px; margin-left: -110px; border-radius: 50%;
+         background: radial-gradient(circle, #FFF3B0 0 45%, var(--sunlight) 46% 70%, rgba(255, 216, 77, 0) 71%);
+         bottom: -60px; filter: drop-shadow(0 0 40px rgba(255, 216, 77, .8)); }
+  .horizon { position: absolute; left: 0; right: 0; bottom: 0; height: 22%; background: linear-gradient(180deg, rgba(27, 33, 64, 0), rgba(27, 33, 64, .55)); }
+  @media (prefers-reduced-motion: no-preference) {
+    .sun { animation: rise 10s ease-in-out infinite alternate; }
+    @keyframes rise { from { bottom: -180px; } to { bottom: 10px; } }
+  }
+
+  /* Setup: night */
+  .night { background: var(--night); color: var(--moon); }
+  .night h2 { font-stretch: 125%; font-weight: 800; font-size: 30px; margin: 0 0 18px; letter-spacing: -0.01em; }
+  .lock { border: 1.5px solid var(--horizon); color: var(--horizon); border-radius: 14px; padding: 11px 14px; font-size: 14px; font-weight: 600; display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
+  .alarm-row { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid rgba(139, 147, 184, .25); }
+  .alarm-row .clock { font-size: 46px; }
+  .alarm-row .meta { color: var(--dusk); font-size: 14px; margin-top: 6px; }
+  .alarm-row.off .clock { color: var(--dusk); }
+  .toggle { width: 52px; height: 32px; border-radius: 999px; background: var(--horizon); position: relative; flex: none; }
+  .toggle::after { content: ""; position: absolute; top: 3px; right: 3px; width: 26px; height: 26px; border-radius: 50%; background: #fff; }
+  .toggle.off { background: var(--night-surface); }
+  .toggle.off::after { right: auto; left: 3px; }
+  .early { margin-top: auto; background: var(--sunlight); color: var(--night); }
+  .field { display: flex; justify-content: space-between; align-items: baseline; padding: 15px 0; border-bottom: 1px solid rgba(139, 147, 184, .25); font-size: 16px; }
+  .field span:last-child { color: var(--dusk); font-variant-numeric: tabular-nums; }
+  .field.locked span:last-child { color: var(--dusk); opacity: .6; }
+  .days { display: flex; gap: 6px; margin: 4px 0 6px; }
+  .days span { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; background: var(--night-surface); color: var(--dusk); }
+  .days span.on { background: var(--moon); color: var(--night); }
+  .objects { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .obj { aspect-ratio: 3 / 4; border-radius: 20px; position: relative; overflow: hidden; }
+  .obj b { position: absolute; left: 10px; bottom: 9px; color: #fff; font-size: 14px; text-shadow: 0 1px 6px rgba(0, 0, 0, .6); }
+  .tip { color: var(--dusk); font-size: 14px; line-height: 1.45; margin: 0 0 14px; }
+  .add { margin-top: auto; background: var(--night-surface); color: var(--moon); }
+
+  .note { max-width: 70ch; margin: 56px auto 0; font-size: 14px; line-height: 1.55; opacity: .75; }
+</style>
+</head>
+<body>
+  <div class="intro">
+    <h1>Night, then sunrise</h1>
+    <p>Setup happens in a calm night indigo. When the alarm goes off, the whole screen turns sunlight yellow, like a wake-up light. While the last minutes ring out, a sun rises over the horizon until the alarm stops.</p>
+    <p>The clock and object names use SF Pro Expanded, very wide and heavy, so you can read them before your eyes are fully open.</p>
+  </div>
+
+  <div class="grid">
+    <figure>
+      <div class="phone ring">
+        <div class="status"><span>6:30</span><span>100%</span></div>
+        <div class="clock">6:30</div>
+        <div class="lead">Go find</div>
+        <div class="display">Kettle</div>
+        <div class="photo"></div>
+        <button class="btn">Open camera</button>
+      </div>
+      <figcaption><strong>Ringing.</strong> The screen itself is the light. There's one button, and nothing on it stops the alarm.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone camera">
+        <div class="viewfinder"></div>
+        <div class="pill">Find: <span>Kettle</span></div>
+        <div class="ref"></div>
+        <div class="controls"><div class="torch on">☀</div><div class="shutter"></div></div>
+      </div>
+      <figcaption><strong>Camera.</strong> Your reference photo stays pinned top right, framed in sunlight so it's easy to spot. The torch is on by default for dark rooms.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone camera">
+        <div class="viewfinder" style="filter: hue-rotate(160deg) brightness(.8)"></div>
+        <div class="pill">Find: <span>Kettle</span></div>
+        <div class="ref"></div>
+        <div class="toast">
+          <div class="body">Not a match. Get closer and try again.</div>
+          <div class="small">Score 18.2, needs 10.8 or lower</div>
+        </div>
+        <div class="controls"><div class="torch on">☀</div><div class="shutter"></div></div>
+      </div>
+      <figcaption><strong>Miss.</strong> Red is used only here. The score line helps us tune strictness during testing.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone rise">
+        <div class="status"><span>6:35</span><span>100%</span></div>
+        <div class="done">Mission done ✓</div>
+        <div class="clock">7:42</div>
+        <div class="until body">until it stops, at 6:43</div>
+        <div class="display stay">You're up.<br>Stay up.</div>
+        <div class="sun"></div>
+        <div class="horizon"></div>
+      </div>
+      <figcaption><strong>Countdown.</strong> The sun climbs as the minutes run out, and the alarm keeps ringing. There's nothing to tap.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone night">
+        <h2>Alarms</h2>
+        <div class="lock">🔒 Locked until your 6:30 alarm is done</div>
+        <div class="alarm-row"><div><div class="clock">6:30</div><div class="meta">Weekdays, rings 10 min after the mission</div></div><div class="toggle"></div></div>
+        <div class="alarm-row off"><div><div class="clock">9:00</div><div class="meta">Weekends</div></div><div class="toggle off"></div></div>
+        <button class="btn early">Up early? Clear your 6:30 alarm</button>
+      </div>
+      <figcaption><strong>Alarm list.</strong> The lock banner and the early-clear button only show up when they apply.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone night">
+        <h2>Edit alarm</h2>
+        <div class="clock" style="font-size:64px;margin-bottom:12px">6:30</div>
+        <div class="days"><span>S</span><span class="on">M</span><span class="on">T</span><span class="on">W</span><span class="on">T</span><span class="on">F</span><span>S</span></div>
+        <div class="field"><span>Sound</span><span>Klaxon</span></div>
+        <div class="field"><span>Keep ringing after mission</span><span>10 min</span></div>
+        <div class="field"><span>Lock edits before alarm</span><span>8 h</span></div>
+        <div class="field"><span>Clear early window</span><span>30 min</span></div>
+      </div>
+      <figcaption><strong>Edit alarm.</strong> Plain rows with the values on the right. When the lock is on, everything here is dimmed.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone night">
+        <h2>Objects</h2>
+        <p class="tip">Pick things that don't move, in rooms away from your bed. One is chosen at random each morning.</p>
+        <div class="objects">
+          <div class="obj" style="background:linear-gradient(160deg,#8f8a80,#5d5850)"><b>Kettle</b></div>
+          <div class="obj" style="background:linear-gradient(160deg,#9fb2c2,#5f7180)"><b>Bathroom sink</b></div>
+          <div class="obj" style="background:linear-gradient(160deg,#a08463,#5f4a35)"><b>Front door</b></div>
+          <div class="obj" style="background:linear-gradient(160deg,#c9c9cf,#7d7d86)"><b>Washing machine</b></div>
+        </div>
+        <button class="btn add">Add object</button>
+      </div>
+      <figcaption><strong>Objects.</strong> Your own photos fill the grid, so the screen looks like your home.</figcaption>
+    </figure>
+  </div>
+
+  <p class="note">On the iPhone the type is Apple's built-in SF Pro Expanded. This preview approximates it with Archivo at its widest setting. The sun animation here loops; in the app it rises once, in step with the countdown.</p>
+</body>
+</html>

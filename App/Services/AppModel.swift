@@ -209,6 +209,16 @@ final class AppModel: ObservableObject {
         return removed
     }
 
+    /// Plays `sound` for 3 seconds (alarm editor). Never interferes with a real ring.
+    func previewSound(_ sound: AlarmSound) {
+        guard !modelRinging else { return }
+        audio.startRinging(sound)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self, !self.modelRinging else { return }
+            self.audio.stopRinging()
+        }
+    }
+
     func requestNotificationPermission() async -> Bool {
         await notifications.requestAuthorization()
     }
