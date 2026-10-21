@@ -11,9 +11,10 @@ final class AlarmAudio {
     private(set) var isRinging = false
     private let log = DiagnosticLog.shared
 
-    /// Session options while ringing. `[]` takes the audio exclusively;
-    /// `[.duckOthers]` mixes and turns other apps' audio down.
-    var ringOptions: AVAudioSession.CategoryOptions = []
+    /// Session options while ringing. Must stay mixable: iOS refuses to activate an
+    /// exclusive (`[]`) session from the background (error 560557684, "cannot interrupt
+    /// others"), seen on device in build 19. `.duckOthers` mixes and turns other audio down.
+    var ringOptions: AVAudioSession.CategoryOptions = [.duckOthers]
 
     init() {
         buildGraph()
