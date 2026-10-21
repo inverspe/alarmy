@@ -79,6 +79,12 @@ struct OnboardingView: View {
                 }
                 .font(Theme.bodyStrong)
                 .foregroundColor(Theme.sunlight)
+                Button("Copy troubleshooting log") {
+                    UIPasteboard.general.string = DiagnosticLog.shared.lines.joined(separator: "\n")
+                }
+                .font(Theme.caption)
+                .foregroundColor(Theme.dusk)
+                .padding(.top, 8)
             }
         case 2:
             title("Your objects")
