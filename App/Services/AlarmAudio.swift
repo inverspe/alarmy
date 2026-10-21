@@ -1,0 +1,93 @@
+import AVFoundation
+import AlarmyCore
+import os
+
+/// Plays the alarm tone, and keeps the app alive in the background by running
+/// the audio engine (rendering silence) while any alarm is armed.
+final class AlarmAudio {
+    private var engine = AVAudioEngine()
+    private let sound = OSAllocatedUnfairLock<AlarmSound?>(initialState: nil)
+    private var keepAlive = false
+    private(set) var isRinging = false
+
+    init() {
+        buildGraph()
+        let center = NotificationCenter.default
+        let session = AVAudioSession.sharedInstance()
+        center.addObserver(forName: AVAudioSession.interruptionNotification, object: session, queue: .main) { [weak self] note in
+            guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
+            self?.resume()
+        }
+        center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: session, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.engine.stop()
+            self.engine = AVAudioEngine()
+            self.buildGraph()
+            self.resume()
+        }
+        center.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] _ in
+            self?.resume()
+        }
+    }
+
+    func startKeepAlive() {
+        keepAlive = true
+        resume()
+    }
+
+    func stopKeepAlive() {
+        keepAlive = false
+        if !isRinging { shutDown() }
+    }
+
+    func startRinging(_ alarmSound: AlarmSound) {
+        sound.withLock { $0 = alarmSound }
+        isRinging = true
+        resume()
+    }
+
+    func stopRinging() {
+        sound.withLock { $0 = nil }
+        isRinging = false
+        if keepAlive { resume() } else { shutDown() }
+    }
+
+    private func buildGraph() {
+        let rate = engine.outputNode.inputFormat(forBus: 0).sampleRate
+        let sampleRate = rate > 0 ? rate : 44_100
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else { return }
+        let sound = self.sound
+        var t = 0.0
+        let step = 1 / sampleRate
+        let node = AVAudioSourceNode(format: format) { _, _, frameCount, bufferList -> OSStatus in
+            let buffers = UnsafeMutableAudioBufferListPointer(bufferList)
+            let current = sound.withLock { $0 }
+            for frame in 0..<Int(frameCount) {
+                let value: Float = current.map { ToneGenerator.sample($0, at: t) } ?? 0
+                t += step
+                for buffer in buffers {
+                    buffer.mData?.assumingMemoryBound(to: Float.self)[frame] = value
+                }
+            }
+            return noErr
+        }
+        engine.attach(node)
+        engine.connect(node, to: engine.mainMixerNode, format: format)
+        engine.mainMixerNode.outputVolume = 1
+    }
+
+    /// Ringing takes the audio session exclusively; keep-alive mixes with other apps.
+    private func resume() {
+        guard keepAlive || isRinging else { return }
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .default, options: isRinging ? [] : [.mixWithOthers])
+        try? session.setActive(true)
+        if !engine.isRunning { try? engine.start() }
+    }
+
+    private func shutDown() {
+        engine.stop()
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+}

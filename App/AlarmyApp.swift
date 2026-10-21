@@ -1,14 +1,15 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct AlarmyApp: App {
+    init() {
+        UNUserNotificationCenter.current().delegate = DiagnosticsServices.shared
+    }
+
     var body: some Scene {
         WindowGroup {
-            VStack(spacing: 8) {
-                Text("Alarmy").font(.largeTitle.bold())
-                Text("Build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?")")
-                    .foregroundStyle(.secondary)
-            }
+            DiagnosticsView()
         }
     }
 }
