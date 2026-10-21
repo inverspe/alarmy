@@ -39,6 +39,11 @@ struct OnboardingView: View {
             AddObjectView().environmentObject(model)
         }
         .task { await refreshNotificationStatus() }
+        // Coming back from the Settings app with permissions changed.
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            cameraOK = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
+            Task { await refreshNotificationStatus() }
+        }
     }
 
     private var canContinue: Bool {
