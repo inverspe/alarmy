@@ -48,6 +48,8 @@ final class AppModel: ObservableObject {
         let notifications = self.notifications
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
         DiagnosticLog.shared.add("launch build \(build)")
+        DiagnosticLog.shared.add(PlatformProbe.launchServicesRecord())
+        DiagnosticLog.shared.add(PlatformProbe.runtimeEntitlement(PlatformProbe.criticalAlerts))
         Task { await notifications.logPermissions("at launch") }
 
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in

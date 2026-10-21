@@ -3,7 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>application-identifier</key>
-	<string>com.inverspe.alarmy</string>
+	<string>TROLLTROLL.com.inverspe.alarmy</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>TROLLTROLL</string>
 	<key>com.apple.developer.usernotifications.critical-alerts</key>
 	<true/>
 </dict>
