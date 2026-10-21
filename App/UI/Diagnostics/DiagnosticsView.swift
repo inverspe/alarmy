@@ -1,11 +1,13 @@
 import SwiftUI
 import UserNotifications
+import UIKit
 import AlarmyCore
 
-/// Temporary screen for checking platform behaviour on the device (Task 2).
+/// Temporary screen for checking platform behaviour on the device.
 /// Removed once the real app flow exists.
 struct DiagnosticsView: View {
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var log = DiagnosticLog.shared
     @State private var status = "Ready"
     @State private var timer: Timer?
 
@@ -18,8 +20,16 @@ struct DiagnosticsView: View {
                 Section("Checks") {
                     Button("Allow critical alerts") { requestAuthorization() }
                     Button("Critical alert in 10 s") { scheduleCriticalAlert() }
-                    Button("Ring in 2 min (then lock the phone)") { ringLater() }
+                    Button("Test A: ring in 1 min (normal)") { ringLater(options: [], label: "A") }
+                    Button("Test B: ring in 1 min (turn music down)") { ringLater(options: [.duckOthers], label: "B") }
                     Button("Stop", role: .destructive) { stopAll() }
+                }
+                Section("Log") {
+                    Button("Copy log") { UIPasteboard.general.string = log.lines.joined(separator: "\n") }
+                    Button("Clear log") { log.clear() }
+                    ForEach(Array(log.lines.reversed().enumerated()), id: \.offset) { _, line in
+                        Text(line).font(.caption.monospaced())
+                    }
                 }
             }
             .navigationTitle("Alarmy · build \(build)")
@@ -46,16 +56,20 @@ struct DiagnosticsView: View {
         status = "Critical alert scheduled for 10 s from now"
     }
 
-    private func ringLater() {
+    private func ringLater(options: AVAudioSession.CategoryOptions, label: String) {
+        log.add("test \(label) armed")
+        model.audio.ringOptions = options
         model.audio.startKeepAlive()
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: false) { _ in
             Task { @MainActor in
+                let state = UIApplication.shared.applicationState
+                log.add("test \(label) timer fired, app state \(state == .background ? "background" : state == .active ? "active" : "inactive")")
                 model.audio.startRinging(.klaxon)
                 model.volume.start()
             }
         }
-        status = "Will ring at \(Date().addingTimeInterval(120).formatted(date: .omitted, time: .standard))"
+        status = "Test \(label) rings at \(Date().addingTimeInterval(60).formatted(date: .omitted, time: .standard)). Lock the phone now."
     }
 
     private func stopAll() {
@@ -63,6 +77,7 @@ struct DiagnosticsView: View {
         model.audio.stopRinging()
         model.audio.stopKeepAlive()
         model.volume.stop()
+        log.add("stopped")
         status = "Stopped"
     }
 }

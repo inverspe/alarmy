@@ -9,6 +9,11 @@ final class AlarmAudio {
     private let sound = OSAllocatedUnfairLock<AlarmSound?>(initialState: nil)
     private var keepAlive = false
     private(set) var isRinging = false
+    private let log = DiagnosticLog.shared
+
+    /// Session options while ringing. `[]` takes the audio exclusively;
+    /// `[.duckOthers]` mixes and turns other apps' audio down.
+    var ringOptions: AVAudioSession.CategoryOptions = []
 
     init() {
         buildGraph()
@@ -16,17 +21,20 @@ final class AlarmAudio {
         let session = AVAudioSession.sharedInstance()
         center.addObserver(forName: AVAudioSession.interruptionNotification, object: session, queue: .main) { [weak self] note in
             guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                  AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
-            self?.resume()
+                  let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+            self?.log.add("audio interruption \(type == .began ? "began" : "ended")")
+            if type == .ended { self?.resume() }
         }
         center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: session, queue: .main) { [weak self] _ in
             guard let self else { return }
+            self.log.add("media services reset")
             self.engine.stop()
             self.engine = AVAudioEngine()
             self.buildGraph()
             self.resume()
         }
         center.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] _ in
+            self?.log.add("engine configuration change")
             self?.resume()
         }
     }
@@ -51,6 +59,7 @@ final class AlarmAudio {
     func startRinging(_ alarmSound: AlarmSound) {
         sound.withLock { $0 = alarmSound }
         isRinging = true
+        log.add("start ringing \(alarmSound.rawValue), options \(ringOptions.rawValue)")
         resume()
     }
 
@@ -84,17 +93,34 @@ final class AlarmAudio {
         engine.mainMixerNode.outputVolume = 1
     }
 
-    /// Ringing takes the audio session exclusively; keep-alive mixes with other apps.
+    /// Options only take effect on activation, so a change of options re-activates the session.
     private func resume() {
         guard keepAlive || isRinging else { return }
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default, options: isRinging ? [] : [.mixWithOthers])
-        try? session.setActive(true)
-        if !engine.isRunning { try? engine.start() }
+        let options: AVAudioSession.CategoryOptions = isRinging ? ringOptions : [.mixWithOthers]
+        let changing = session.category != .playback || session.categoryOptions != options
+        if changing && engine.isRunning {
+            engine.stop()
+            do { try session.setActive(false) } catch { log.add("deactivate failed: \(describe(error))") }
+        }
+        do { try session.setCategory(.playback, mode: .default, options: options) } catch {
+            log.add("setCategory failed: \(describe(error))")
+        }
+        do { try session.setActive(true) } catch { log.add("activate failed: \(describe(error))") }
+        if !engine.isRunning {
+            do { try engine.start() } catch { log.add("engine start failed: \(describe(error))") }
+        }
+        log.add("resume ringing=\(isRinging) options=\(options.rawValue) otherAudio=\(session.isOtherAudioPlaying) running=\(engine.isRunning)")
     }
 
     private func shutDown() {
         engine.stop()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        log.add("audio shut down")
+    }
+
+    private func describe(_ error: Error) -> String {
+        let ns = error as NSError
+        return "\(ns.code) \(ns.localizedDescription)"
     }
 }
