@@ -1,0 +1,9 @@
+.superpowers/
+build/
+*.xcodeproj
+DerivedData/
+App/Info.plist
+Payload/
+*.tipa
+.build/
+.swiftpm/
