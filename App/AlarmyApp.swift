@@ -21,6 +21,14 @@ struct RootView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
+        if let session = model.state.ringSession, session.phase != .finished {
+            MorningFlowView()
+        } else {
+            tabs
+        }
+    }
+
+    private var tabs: some View {
         TabView {
             AlarmListView().tabItem { Label("Alarms", systemImage: "alarm") }
             ObjectsView().tabItem { Label("Objects", systemImage: "camera") }
