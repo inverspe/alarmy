@@ -1,15 +1,17 @@
 import SwiftUI
-import UserNotifications
 
 @main
 struct AlarmyApp: App {
-    init() {
-        UNUserNotificationCenter.current().delegate = DiagnosticsServices.shared
-    }
+    @StateObject private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             DiagnosticsView()
+                .environmentObject(model)
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { model.tick() }
         }
     }
 }

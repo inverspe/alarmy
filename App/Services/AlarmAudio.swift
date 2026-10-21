@@ -32,13 +32,20 @@ final class AlarmAudio {
     }
 
     func startKeepAlive() {
+        guard !keepAlive else { return }
         keepAlive = true
         resume()
     }
 
     func stopKeepAlive() {
+        guard keepAlive else { return }
         keepAlive = false
         if !isRinging { shutDown() }
+    }
+
+    /// Restarts the engine if something (e.g. another app) stopped it without telling us.
+    func ensureRunning() {
+        if (keepAlive || isRinging) && !engine.isRunning { resume() }
     }
 
     func startRinging(_ alarmSound: AlarmSound) {

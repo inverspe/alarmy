@@ -4,21 +4,10 @@ import AlarmyCore
 
 /// Temporary screen for checking platform behaviour on the device (Task 2).
 /// Removed once the real app flow exists.
-final class DiagnosticsServices: NSObject, UNUserNotificationCenterDelegate {
-    static let shared = DiagnosticsServices()
-    let audio = AlarmAudio()
-    let volume = VolumeEnforcer()
-
-    func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
-    }
-}
-
 struct DiagnosticsView: View {
+    @EnvironmentObject private var model: AppModel
     @State private var status = "Ready"
     @State private var timer: Timer?
-    private let services = DiagnosticsServices.shared
 
     private var build: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?" }
 
@@ -39,14 +28,9 @@ struct DiagnosticsView: View {
 
     private func requestAuthorization() {
         Task {
-            do {
-                let center = UNUserNotificationCenter.current()
-                let granted = try await center.requestAuthorization(options: [.alert, .sound, .criticalAlert])
-                let settings = await center.notificationSettings()
-                status = "Granted: \(granted), critical: \(settings.criticalAlertSetting == .enabled)"
-            } catch {
-                status = "Error: \(error.localizedDescription)"
-            }
+            let granted = await model.requestNotificationPermission()
+            let critical = await model.notifications.criticalAlertsEnabled()
+            status = "Granted: \(granted), critical: \(critical)"
         }
     }
 
@@ -63,20 +47,22 @@ struct DiagnosticsView: View {
     }
 
     private func ringLater() {
-        services.audio.startKeepAlive()
+        model.audio.startKeepAlive()
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { _ in
-            services.audio.startRinging(.klaxon)
-            services.volume.start()
+            Task { @MainActor in
+                model.audio.startRinging(.klaxon)
+                model.volume.start()
+            }
         }
         status = "Will ring at \(Date().addingTimeInterval(120).formatted(date: .omitted, time: .standard))"
     }
 
     private func stopAll() {
         timer?.invalidate()
-        services.audio.stopRinging()
-        services.audio.stopKeepAlive()
-        services.volume.stop()
+        model.audio.stopRinging()
+        model.audio.stopKeepAlive()
+        model.volume.stop()
         status = "Stopped"
     }
 }
