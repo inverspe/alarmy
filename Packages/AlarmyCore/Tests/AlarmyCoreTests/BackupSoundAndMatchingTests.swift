@@ -50,6 +50,12 @@ final class MatchingAccuracyTests: XCTestCase {
         XCTAssertEqual(result.closestOther ?? 1, 0, accuracy: 0.001)
     }
 
+    func testReportsWhichOtherObjectWasClosest() throws {
+        let others = [[try fp(scene(3))], [try fp(scene(1))], []]
+        let result = try m.evaluate(scene(1), target: [try fp(scene(2))], others: others, strictness: .medium)
+        XCTAssertEqual(result.closestOtherIndex, 1)
+    }
+
     func testAcceptedWhenTargetIsClosest() throws {
         let result = try m.evaluate(scene(1, brightness: 0.7), target: [try fp(scene(1))],
                                     others: [[try fp(scene(2))], [try fp(scene(3))]], strictness: .medium)

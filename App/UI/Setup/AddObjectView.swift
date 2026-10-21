@@ -9,6 +9,7 @@ struct AddObjectView: View {
     @State private var shots: [UIImage] = []
     @State private var error: String?
     @State private var busy = false
+    @State private var lookalike: RegisteredObject?
 
     private let maxShots = 3
 
@@ -84,6 +85,13 @@ struct AddObjectView: View {
         .padding(.bottom, 16)
         .background(Theme.night.ignoresSafeArea())
         .task { await camera.start() }
+        .alert("This looks a lot like (lookalike?.name ?? "another object")",
+               isPresented: Binding(get: { lookalike != nil }, set: { if !$0 { lookalike = nil } })) {
+            Button("Save anyway") { save(allowLookalike: true) }
+            Button("Retake", role: .cancel) { shots.removeAll() }
+        } message: {
+            Text("Look-alike objects make the morning photo harder to match. Pick something more distinct, or save anyway.")
+        }
         .onDisappear { camera.stop() }
     }
 
@@ -102,7 +110,11 @@ struct AddObjectView: View {
         }
     }
 
-    private func save() {
+    private func save(allowLookalike: Bool = false) {
+        if !allowLookalike, let similar = model.lookalike(for: shots) {
+            lookalike = similar
+            return
+        }
         busy = true
         defer { busy = false }
         do {

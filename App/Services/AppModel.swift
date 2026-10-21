@@ -4,7 +4,8 @@ import AlarmyCore
 
 enum MissionResult {
     case matched
-    case miss(distance: Float, threshold: Float, switchedTo: RegisteredObject?)
+    /// `lookedLike` is another registered object the photo resembled more than the requested one.
+    case miss(distance: Float, threshold: Float, switchedTo: RegisteredObject?, lookedLike: RegisteredObject?)
 }
 
 /// Owns the app state and drives the alarm: starts sessions when an alarm is due,
@@ -50,7 +51,11 @@ final class AppModel: ObservableObject {
         DiagnosticLog.shared.add("launch build \(build)")
         DiagnosticLog.shared.add(PlatformProbe.launchServicesRecord())
         DiagnosticLog.shared.add(PlatformProbe.runtimeEntitlement(PlatformProbe.criticalAlerts))
-        Task { await notifications.logPermissions("at launch") }
+        BackupSounds.installIfNeeded()
+        Task { [weak self] in
+            await notifications.logPermissions("at launch")
+            self?.planDirty = true
+        }
 
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
@@ -192,15 +197,23 @@ final class AppModel: ObservableObject {
     func submitMissionPhoto(_ image: UIImage) async -> MissionResult? {
         guard let session = state.ringSession, session.phase == .mission, let object = currentObject else { return nil }
         let references = object.referencePhotoIDs.compactMap { photos.featurePrint($0) }
+        let others = state.objects.filter { $0.id != object.id }
+        let otherReferences = others.map { $0.referencePhotoIDs.compactMap { photos.featurePrint($0) } }
         let strictness = state.strictness
         let matcher = self.matcher
-        let evaluation = await Task.detached { () -> (matched: Bool, distance: Float, threshold: Float) in
+        let evaluation = await Task.detached { () -> PhotoMatcher.MatchResult in
             guard let cg = image.normalized(maxSide: 1280).cgImage,
-                  let result = try? matcher.evaluate(cg, references: references, strictness: strictness) else {
-                return (false, .infinity, PhotoMatcher.threshold(for: strictness))
+                  let result = try? matcher.evaluate(cg, target: references, others: otherReferences, strictness: strictness) else {
+                return PhotoMatcher.MatchResult(matched: false, distance: .infinity, threshold: PhotoMatcher.threshold(for: strictness),
+                                                closestOther: nil, closestOtherIndex: nil)
             }
             return result
         }.value
+        let lookedLike = evaluation.matched ? nil : evaluation.closestOtherIndex
+            .flatMap { index in (evaluation.closestOther ?? .infinity) <= evaluation.distance ? others[index] : nil }
+        DiagnosticLog.shared.add(String(format: "mission %@: %@ score %.2f (needs <= %.2f), closest other %@",
+                                        object.name, evaluation.matched ? "match" : "miss", evaluation.distance,
+                                        evaluation.threshold, evaluation.closestOther.map { String(format: "%.2f", $0) } ?? "none"))
 
         // The session may have moved on while matching (e.g. fire time passed for an early clear).
         guard var current = state.ringSession, current.occurrence == session.occurrence, current.phase == .mission else {
@@ -219,7 +232,7 @@ final class AppModel: ObservableObject {
         s.ringSession = current
         commit(s)
         let switched = current.currentObjectID != before ? state.objects.first { $0.id == current.currentObjectID } : nil
-        return .miss(distance: evaluation.distance, threshold: evaluation.threshold, switchedTo: switched)
+        return .miss(distance: evaluation.distance, threshold: evaluation.threshold, switchedTo: switched, lookedLike: lookedLike)
     }
 
     func addObject(name: String, photos images: [UIImage]) throws -> Bool {
@@ -228,6 +241,24 @@ final class AppModel: ObservableObject {
         let added = update { $0.objects.append(RegisteredObject(name: name, referencePhotoIDs: ids)) }
         if !added { ids.forEach(photos.delete) }
         return added
+    }
+
+    /// The existing object these photos look most like, when close enough to be confused
+    /// with it at Medium strictness. Look-alike objects make the morning photo unreliable.
+    func lookalike(for images: [UIImage]) -> RegisteredObject? {
+        let prints = images.compactMap { $0.normalized(maxSide: 1280).cgImage }.compactMap { try? matcher.featurePrint(for: $0) }
+        let limit = PhotoMatcher.threshold(for: .medium)
+        var best: (object: RegisteredObject, distance: Float)?
+        for object in state.objects {
+            let references = object.referencePhotoIDs.compactMap { photos.featurePrint($0) }
+            for print in prints {
+                guard let d = try? matcher.distance(fromPrint: print, toReferences: references),
+                      d <= limit, d < (best?.distance ?? .infinity) else { continue }
+                best = (object, d)
+            }
+        }
+        if let best { DiagnosticLog.shared.add(String(format: "new object resembles %@ (%.2f)", best.object.name, best.distance)) }
+        return best?.object
     }
 
     func deleteObject(_ id: UUID) -> Bool {
@@ -293,7 +324,8 @@ final class AppModel: ObservableObject {
         let upcoming = Schedule.upcoming(state.alarms, after: t, calendar: calendar, limit: 3)
         let plan = BackupPlanner.plan(upcoming: upcoming, completed: Set(state.completed.keys),
                                       session: state.ringSession, now: t)
-        notifications.apply(plan, calendar: calendar)
+        let alarms = state.alarms
+        notifications.apply(plan, soundFor: { key in alarms.first { $0.id == key.alarmID }?.sound ?? .klaxon }, calendar: calendar)
         lastPlanAt = t
         planDirty = false
     }

@@ -5,6 +5,8 @@ import AlarmyCore
 final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
     private let center = UNUserNotificationCenter.current()
     private var lastApplied: [String] = []
+    /// Refreshed whenever permissions are read; critical sounds are used only when allowed.
+    private(set) var criticalEnabled = false
 
     var onTap: (@MainActor () -> Void)?
     /// While the app is on screen and already ringing, backups are not shown.
@@ -46,12 +48,14 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
         case .ephemeral: status = "ephemeral"
         @unknown default: status = "unknown"
         }
+        criticalEnabled = s.criticalAlertSetting == .enabled
         DiagnosticLog.shared.add("notifications \(context): status=\(status) alert=\(name(s.alertSetting)) sound=\(name(s.soundSetting)) critical=\(name(s.criticalAlertSetting))")
     }
 
     /// Replaces every pending request with `plan`. No-op when the plan hasn't changed.
-    func apply(_ plan: [PlannedNotification], calendar: Calendar = .current) {
-        let ids = plan.map(\.id)
+    func apply(_ plan: [PlannedNotification], soundFor: (OccurrenceKey) -> AlarmSound, calendar: Calendar = .current) {
+        let critical = criticalEnabled
+        let ids = plan.map { "\($0.id)-\(soundFor($0.occurrence).rawValue)-\(critical)" }
         guard ids != lastApplied else { return }
         lastApplied = ids
         center.removeAllPendingNotificationRequests()
@@ -59,7 +63,7 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
             let content = UNMutableNotificationContent()
             content.title = "Alarm"
             content.body = "Open Alarmy to do your mission."
-            content.sound = .defaultCriticalSound(withAudioVolume: 1)
+            content.sound = BackupSounds.notificationSound(soundFor(item.occurrence), critical: critical)
             content.interruptionLevel = .critical
             content.userInfo = [
                 "alarmID": item.occurrence.alarmID.uuidString,

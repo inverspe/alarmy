@@ -113,12 +113,15 @@ struct MissionCameraView: View {
             switch result {
             case .matched:
                 toast = nil
-            case .miss(let distance, let threshold, let switchedTo):
+            case .miss(let distance, let threshold, let switchedTo, let lookedLike):
                 let detail = distance.isFinite
                     ? String(format: "Score %.1f, needs %.1f or lower", distance, threshold)
                     : "No reference photo to compare with"
                 if let switchedTo {
                     toast = Toast(text: "Switched to \(switchedTo.name)", detail: detail, isMiss: false)
+                } else if let lookedLike {
+                    toast = Toast(text: "That looks more like (lookedLike.name). Find (model.currentObject?.name ?? "the right object").",
+                                  detail: detail, isMiss: true)
                 } else {
                     toast = Toast(text: "Not a match. Get closer and try again.", detail: detail, isMiss: true)
                 }
