@@ -37,6 +37,24 @@ public struct Alarm: Codable, Identifiable, Equatable {
         self.lockHours = lockHours
         self.earlyClearMinutes = earlyClearMinutes
     }
+
+    enum CodingKeys: String, CodingKey {
+        case id, hour, minute, repeatDays, isEnabled, sound, ringAfterMinutes, lockHours, earlyClearMinutes
+    }
+
+    /// Missing fields fall back to defaults, so a state file from an older build still loads.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        hour = try c.decode(Int.self, forKey: .hour)
+        minute = try c.decode(Int.self, forKey: .minute)
+        repeatDays = try c.decodeIfPresent(Set<Weekday>.self, forKey: .repeatDays) ?? []
+        isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        sound = (try? c.decodeIfPresent(AlarmSound.self, forKey: .sound)) ?? .klaxon
+        ringAfterMinutes = try c.decodeIfPresent(Int.self, forKey: .ringAfterMinutes) ?? 10
+        lockHours = try c.decodeIfPresent(Int.self, forKey: .lockHours) ?? 8
+        earlyClearMinutes = try c.decodeIfPresent(Int.self, forKey: .earlyClearMinutes) ?? 30
+    }
 }
 
 public struct RegisteredObject: Codable, Identifiable, Equatable {
@@ -89,4 +107,21 @@ public struct AppState: Codable, Equatable {
     public var clockAnchor: ClockAnchor? = nil
 
     public init() {}
+
+    enum CodingKeys: String, CodingKey {
+        case alarms, objects, strictness, completed, ringSession, onboardingDone, clockAnchor
+    }
+
+    /// Missing fields fall back to defaults, and an unreadable session or clock anchor is
+    /// dropped instead of failing the whole file — losing every alarm would be far worse.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        alarms = try c.decodeIfPresent([Alarm].self, forKey: .alarms) ?? []
+        objects = try c.decodeIfPresent([RegisteredObject].self, forKey: .objects) ?? []
+        strictness = (try? c.decodeIfPresent(Strictness.self, forKey: .strictness)) ?? .medium
+        completed = (try? c.decodeIfPresent([OccurrenceKey: Date].self, forKey: .completed)) ?? [:]
+        ringSession = try? c.decodeIfPresent(RingSession.self, forKey: .ringSession)
+        onboardingDone = try c.decodeIfPresent(Bool.self, forKey: .onboardingDone) ?? false
+        clockAnchor = try? c.decodeIfPresent(ClockAnchor.self, forKey: .clockAnchor)
+    }
 }

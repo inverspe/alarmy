@@ -43,7 +43,7 @@ struct OnboardingView: View {
 
     private var canContinue: Bool {
         switch step {
-        case 1: return notificationsOK && cameraOK
+        case 1: return notificationsOK && criticalOK && cameraOK
         case 2: return !model.state.objects.isEmpty
         default: return true
         }
@@ -58,7 +58,7 @@ struct OnboardingView: View {
         case 1:
             title("Two permissions")
             paragraph("Notifications ring through silent mode and Do Not Disturb if the app gets closed. The camera is how you turn the alarm off.")
-            permissionRow("Notifications", done: notificationsOK && criticalOK, detail: notificationsOK && !criticalOK ? "Allow critical alerts too, or the backups stay silent." : nil) {
+            permissionRow("Notifications", done: notificationsOK && criticalOK, detail: notificationsOK && !criticalOK ? "Critical alerts are off. Turn them on in Settings → Notifications → Alarmy, or backups stay silent in silent mode." : nil) {
                 Task {
                     _ = await model.requestNotificationPermission()
                     await refreshNotificationStatus()
@@ -69,7 +69,7 @@ struct OnboardingView: View {
                     cameraOK = await AVCaptureDevice.requestAccess(for: .video)
                 }
             }
-            if !(notificationsOK && cameraOK) {
+            if !(notificationsOK && criticalOK && cameraOK) {
                 Button("Open Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                 }

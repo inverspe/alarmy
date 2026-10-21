@@ -32,6 +32,7 @@ final class VolumeEnforcer {
     }
 
     private func setMax() {
+        attachIfNeeded()
         // The slider only takes effect once MPVolumeView has laid out.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             guard let slider = self?.volumeView.subviews.compactMap({ $0 as? UISlider }).first else { return }

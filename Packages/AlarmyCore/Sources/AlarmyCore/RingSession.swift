@@ -66,9 +66,16 @@ public struct RingSession: Codable, Equatable {
             : .countdown(endsAt: now.addingTimeInterval(TimeInterval(ringAfterMinutes) * 60))
     }
 
+    /// Ends the countdown when it runs out. An unfinished mission gives up at the
+    /// hard cap, so a mission that can't be completed never rings forever.
     public mutating func tick(now: Date) {
-        if case .countdown(let endsAt) = phase, now >= endsAt {
+        switch phase {
+        case .countdown(let endsAt) where now >= endsAt:
             phase = .finished
+        case .mission where now >= occurrence.fireDate.addingTimeInterval(Schedule.hardCap):
+            phase = .finished
+        default:
+            break
         }
     }
 }

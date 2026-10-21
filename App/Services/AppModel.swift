@@ -29,6 +29,8 @@ final class AppModel: ObservableObject {
     private var planDirty = true
     private var modelRinging = false
     private var modelKeepAlive = false
+    /// Constant for the life of the process; a different value means the phone rebooted.
+    private let bootID = AppModel.bootSessionID()
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -76,7 +78,14 @@ final class AppModel: ObservableObject {
     }
 
     func trustedNow() -> Date {
-        TrustedClock.now(wall: Date(), monotonic: Self.monotonic(), anchor: state.clockAnchor)
+        TrustedClock.now(wall: Date(), monotonic: Self.monotonic(), bootID: bootID, anchor: state.clockAnchor)
+    }
+
+    /// Re-attaches the volume enforcer (it needs a key window, which may not exist
+    /// yet on a cold launch from a backup tap), then ticks.
+    func sceneBecameActive() {
+        if modelRinging { volume.start() }
+        tick()
     }
 
     // MARK: Tick
@@ -84,13 +93,16 @@ final class AppModel: ObservableObject {
     func tick() {
         let wall = Date()
         let monotonic = Self.monotonic()
-        let t = TrustedClock.now(wall: wall, monotonic: monotonic, anchor: state.clockAnchor)
+        let t = TrustedClock.now(wall: wall, monotonic: monotonic, bootID: bootID, anchor: state.clockAnchor)
         now = t
         var s = state
 
-        // Re-anchor at most once a minute, so state isn't rewritten every second.
-        let anchor = TrustedClock.refreshedAnchor(s.clockAnchor, wall: wall, monotonic: monotonic)
-        if s.clockAnchor == nil || anchor.wall.timeIntervalSince(s.clockAnchor!.wall) >= 60 {
+        // Re-anchor at most once a minute (so state isn't rewritten every second),
+        // but immediately after a reboot.
+        let anchor = TrustedClock.refreshedAnchor(s.clockAnchor, wall: wall, monotonic: monotonic, bootID: bootID)
+        if let old = s.clockAnchor, old.bootID == bootID, anchor.wall.timeIntervalSince(old.wall) < 60 {
+            // keep
+        } else {
             s.clockAnchor = anchor
         }
 
@@ -133,6 +145,8 @@ final class AppModel: ObservableObject {
         var s = state
         change(&s)
         if s.objects.isEmpty && s.alarms.contains(where: \.isEnabled) { return false }
+        s.completed = Completion.suppressFired(old: state.alarms, new: s.alarms, completed: s.completed,
+                                               now: trustedNow(), calendar: calendar)
         commit(s)
         tick()
         return true
@@ -285,5 +299,15 @@ final class AppModel: ObservableObject {
 
     private static func monotonic() -> TimeInterval {
         Double(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000
+    }
+
+    /// `kern.bootsessionuuid` — changes on every boot and, unlike `kern.boottime`,
+    /// doesn't move when the clock is set by hand.
+    private static func bootSessionID() -> String? {
+        var size = 0
+        guard sysctlbyname("kern.bootsessionuuid", nil, &size, nil, 0) == 0, size > 0 else { return nil }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("kern.bootsessionuuid", &buffer, &size, nil, 0) == 0 else { return nil }
+        return String(cString: buffer)
     }
 }

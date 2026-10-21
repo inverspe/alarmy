@@ -15,4 +15,24 @@ public enum Completion {
         }
         return result
     }
+
+    /// For alarms that are new, newly enabled, or moved to a different time or days,
+    /// occurrences that already fired within the hard cap count as done — so saving an
+    /// edit never makes an alarm ring straight away.
+    public static func suppressFired(old: [Alarm], new: [Alarm], completed: [OccurrenceKey: Date],
+                                     now: Date, calendar: Calendar) -> [OccurrenceKey: Date] {
+        let changed = new.filter { alarm in
+            guard alarm.isEnabled else { return false }
+            guard let before = old.first(where: { $0.id == alarm.id }) else { return true }
+            return !before.isEnabled || before.hour != alarm.hour || before.minute != alarm.minute
+                || before.repeatDays != alarm.repeatDays
+        }
+        var result = completed
+        for occurrence in Schedule.occurrences(changed, from: now.addingTimeInterval(-Schedule.hardCap),
+                                               through: now, calendar: calendar)
+        where result[occurrence.key] == nil {
+            result[occurrence.key] = now
+        }
+        return result
+    }
 }

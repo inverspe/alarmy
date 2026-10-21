@@ -12,7 +12,7 @@ struct AlarmyApp: App {
                 .preferredColorScheme(.dark)
         }
         .onChange(of: scenePhase) { phase in
-            if phase == .active { model.tick() }
+            if phase == .active { model.sceneBecameActive() }
         }
     }
 }
