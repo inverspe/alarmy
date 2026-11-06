@@ -204,6 +204,8 @@ public struct MissionStuckTracker: Equatable {
     /// Only getting further than ever before shows it's working: a slow sensor that
     /// keeps restarting from zero would otherwise never count as stuck.
     public mutating func counted(_ count: Int, for kind: MissionKind) {
+        guard count > best[kind, default: 0] else { return }
+        best[kind] = count
         seconds[kind] = 0
     }
 

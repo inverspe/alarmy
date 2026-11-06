@@ -76,7 +76,7 @@ public enum BackupPlanner {
 
         // An early clear isn't done until it's done, so if the app dies partway through the alarm still goes off.
         let pending = upcoming
-            .filter { !completed.contains($0.key) && $0.key != session?.occurrence }
+            .filter { !completed.contains($0.key) && ($0.key != session?.occurrence || session?.isEarlyClear == true) }
             .sorted { $0.fireDate < $1.fireDate }
         for occurrence in pending {
             let first = occurrence.fireDate.addingTimeInterval(TimeInterval(min(occurrence.alarm.gentleSeconds, longestGentleWait)))
