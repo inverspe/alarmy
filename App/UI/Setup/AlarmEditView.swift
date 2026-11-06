@@ -52,16 +52,37 @@ struct AlarmEditView: View {
 
                     MissionListEditor(missions: $alarm.missions)
 
+                    toggleField("Vibrate", isOn: $alarm.vibrate)
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        toggleField("Quiet during missions", isOn: $alarm.quietDuringMissions)
+                        Text("The sound stops while a mission is open. If nothing happens for 20 seconds, the mission closes, the sound comes back and the missions start over.")
+                            .font(Theme.caption)
+                            .foregroundColor(Theme.dusk)
+                            .padding(.vertical, 8)
+                    }
+                }
+                .disabled(model.isLocked)
+
+                Group {
                     field("Gentle wake-up") {
                         Picker("Gentle wake-up", selection: $alarm.gentleSeconds) {
-                            ForEach(GentleRamp.choices, id: \.self) { Text($0 == 0 ? "Off" : "\($0) s").tag($0) }
+                            ForEach(GentleRamp.choices, id: \.self) { Text(gentleLabel($0)).tag($0) }
                         }
                         .pickerStyle(.menu)
                         .tint(Theme.dusk)
                     }
 
                     stepperField("Keep ringing after mission", value: $alarm.ringAfterMinutes, range: 1...60, step: 1) { "\($0) min" }
-                    stepperField("Wake-up check after ring", value: $alarm.wakeCheckMinutes, range: 0...30, step: 1) { $0 == 0 ? "Off" : "\($0) min" }
+
+                    field("Wake-up check after ring") {
+                        Picker("Wake-up check after ring", selection: $alarm.wakeCheckMinutes) {
+                            ForEach(wakeCheckChoices, id: \.self) { Text($0 == 0 ? "Off" : "\($0) min").tag($0) }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(Theme.dusk)
+                    }
+
                     stepperField("Lock edits before alarm", value: $alarm.lockHours, range: 0...12, step: 1) { $0 == 0 ? "Off" : "\($0) h" }
                     stepperField("Clear early window", value: $alarm.earlyClearMinutes, range: 0...60, step: 5) { $0 == 0 ? "Off" : "\($0) min" }
                 }
@@ -89,6 +110,24 @@ struct AlarmEditView: View {
             .padding(.bottom, 32)
         }
         .background(Theme.night.ignoresSafeArea())
+    }
+
+    private func gentleLabel(_ seconds: Int) -> String {
+        if seconds == 0 { return "Off" }
+        return seconds < 120 ? "\(seconds) s" : "\(seconds / 60) min"
+    }
+
+    /// Includes what's saved, for an alarm set to a time that's no longer offered.
+    private var wakeCheckChoices: [Int] {
+        Array(Set(RingSession.wakeCheckChoices + [alarm.wakeCheckMinutes])).sorted()
+    }
+
+    private func toggleField(_ label: String, isOn: Binding<Bool>) -> some View {
+        field(label) {
+            Toggle(label, isOn: isOn)
+                .labelsHidden()
+                .tint(Theme.sunlight)
+        }
     }
 
     private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {

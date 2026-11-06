@@ -25,6 +25,7 @@ struct MissionCameraView: View {
                 CameraPreview(session: camera.session).ignoresSafeArea()
 
                 VStack(spacing: 0) {
+                    MissionTopBar(tint: Theme.sunlight).padding(.bottom, 8)
                     HStack(alignment: .top) {
                         (Text("Find: ").foregroundColor(Theme.moon) + Text(object?.name ?? "").foregroundColor(Theme.sunlight))
                             .font(.system(size: 15, weight: .bold))
@@ -103,6 +104,7 @@ struct MissionCameraView: View {
 
     private func shoot() {
         busy = true
+        model.noteMissionInput()
         Task {
             defer { busy = false }
             guard let photo = try? await camera.capture() else {
@@ -113,15 +115,14 @@ struct MissionCameraView: View {
             switch result {
             case .matched:
                 toast = nil
-            case .miss(let distance, let threshold, let switchedTo, let lookedLike):
-                let detail = distance.isFinite
-                    ? String(format: "Score %.1f, needs %.1f or lower", distance, threshold)
+                Haptics.success()
+            case .miss(let distance, let limit, let switchedTo):
+                Haptics.failure()
+                let detail = distance < Float.greatestFiniteMagnitude
+                    ? String(format: "Score %.1f, needs under %.1f", distance, limit)
                     : "No reference photo to compare with"
                 if let switchedTo {
                     toast = Toast(text: "Switched to \(switchedTo.name)", detail: detail, isMiss: false)
-                } else if let lookedLike {
-                    toast = Toast(text: "That looks more like \(lookedLike.name). Find \(model.currentObject?.name ?? "the right object").",
-                                  detail: detail, isMiss: true)
                 } else {
                     toast = Toast(text: "Not a match. Get closer and try again.", detail: detail, isMiss: true)
                 }

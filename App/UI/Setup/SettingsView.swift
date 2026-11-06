@@ -20,23 +20,6 @@ struct SettingsView: View {
                         .padding(.bottom, 14)
                 }
 
-                Text("Photo matching").font(Theme.bodyStrong).foregroundColor(Theme.moon)
-                Picker("Photo matching", selection: Binding(
-                    get: { model.state.strictness },
-                    set: { value in model.update { $0.strictness = value } }
-                )) {
-                    Text("Loose").tag(Strictness.loose)
-                    Text("Medium").tag(Strictness.medium)
-                    Text("Strict").tag(Strictness.strict)
-                }
-                .pickerStyle(.segmented)
-                .padding(.vertical, 10)
-                .disabled(model.isLocked)
-
-                Text("Loose accepts rougher photos. Strict needs a close match to your reference photo.")
-                    .font(Theme.caption)
-                    .foregroundColor(Theme.dusk)
-
                 Button("Show setup guide again") { model.restartOnboarding() }
                     .font(Theme.bodyStrong)
                     .foregroundColor(Theme.sunlight)

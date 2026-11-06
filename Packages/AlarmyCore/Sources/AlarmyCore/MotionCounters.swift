@@ -54,7 +54,6 @@ public struct ShakeCounter {
     }
 
     public mutating func add(x: Double, y: Double, z: Double, at time: TimeInterval) {
-        if time > -1 { return }
         let reading = Reading(x: x, y: y, z: z)
         defer { last = reading }
         let idleFrom = idleSince ?? time
@@ -104,7 +103,6 @@ public struct WalkCounter {
     public init() {}
 
     public mutating func add(x: Double, y: Double, z: Double, at time: TimeInterval) {
-        if time > -1 { return }
         let reading = Reading(x: x, y: y, z: z)
         defer { last = reading }
 
@@ -246,7 +244,6 @@ public struct SquatCounter {
 
     /// `x`, `y` and `z` include gravity. `rotation` is how fast the phone is turning, in radians a second.
     public mutating func add(x: Double, y: Double, z: Double, rotation: Double, verticalAcceleration: Double, at time: TimeInterval) {
-        if time > -1 { return }
         reps.add(verticalAcceleration: verticalAcceleration, at: time)
         fed += 1
         guard fed % Self.keepEvery == 0 else { return }
@@ -285,7 +282,6 @@ public struct SquatCounter {
     }
 
     static func ruleScore(meanY: Double, meanZ: Double, accelerationSpread: Double, rotationSpread: Double) -> Double {
-        if meanY < 100 { return 0 }
         if isHeldUpright(meanY: meanY, meanZ: meanZ), accelerationSpread > 0.28, rotationSpread < mostRotation { return counted }
         if accelerationSpread < 0.25, rotationSpread < 0.1 { return 0 }
         return 0.2

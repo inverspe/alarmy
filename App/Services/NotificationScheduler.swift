@@ -73,8 +73,11 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
                 content.title = "Still up?"
                 content.body = "Tap now to confirm, or the alarm and your mission start over."
                 content.sound = .default
+            case .nudge:
+                content.title = BackupCopy.title(at: index)
+                content.body = "Open Alarmy to do your mission."
             }
-            content.interruptionLevel = .critical
+            content.interruptionLevel = item.kind == .nudge ? .active : .critical
             content.userInfo = [
                 "alarmID": item.occurrence.alarmID.uuidString,
                 "fireDate": item.occurrence.fireDate.timeIntervalSince1970,

@@ -17,6 +17,7 @@ Success means the owner gets out of bed and stays up. The owner's own expectatio
 
 - Missions per alarm, stacked in any order the owner chooses: **photo of a registered object** (picked at random each morning), **steps**, **squats**, **shake** and **math**. Photo is the default. (Owner changed this from photo only on 2026-11-06.)
 - **Keep ringing after the mission** for a configurable time (default 10 minutes), then stop by itself.
+- **Vibrates** once a second while ringing, per alarm, on by default. Not while a mission is open, as that would disturb the motion sensors.
 - **Edit lock**: alarm settings and objects can't be changed during a configurable window before the alarm.
 - **Can't be uninstalled** (achieved with iOS settings plus TrollStore hardening, see below).
 - Rings through the silent switch and Do Not Disturb/Focus.
@@ -51,7 +52,7 @@ Success means the owner gets out of bed and stays up. The owner's own expectatio
 
 Flow approved by the owner from wireframes (`.superpowers/brainstorm/.../content/morning-flow.html`):
 
-1. **Ringing screen.** Shows the time and "Go find: <Object name>" with that object's reference photo. No snooze, no stop. The only action is **Open camera**.
+1. **Ringing screen.** Shows the time and "Go find: <Object name>" with that object's reference photo, or the mission to do. No snooze, no stop. The only action is **Open camera** or **Start mission**.
 2. **Camera.** Live viewfinder with the reference photo pinned in a corner, flash toggle, shutter. Camera capture only; picking from the photo library is not allowed.
 3. **Miss.** "Not a match, try again." Stays on the camera, alarm keeps ringing.
 4. **Countdown.** After a match: "Mission done ✓", a countdown ring showing time until it stops, and "You're up. Stay up." The alarm **keeps ringing throughout**. Nothing to tap. When the countdown ends, the alarm stops by itself.
@@ -64,17 +65,21 @@ Flow approved by the owner from wireframes (`.superpowers/brainstorm/.../content
 - **An "object" is a fixed thing in its usual place** (kettle on the counter, bathroom sink, front door), not a portable item. Matching compares the whole scene against the reference photo(s), and onboarding tells the owner to pick things that don't move. This also stops a sleepy owner from bringing the object to bed. (My call, based on the examples the owner accepted.)
 - Each morning one registered object is picked at random.
 - Matching happens on-device and offline (Apple Vision image feature prints or similar). It must tolerate morning lighting; flash is available.
-- There's a strictness setting (loose to strict) so the owner can tune false rejects and false accepts.
+- Only the centre square of each photo is compared. A photo passes below a limit that starts at 20 and rises by 2 with every miss, up to 36. A pass sets it back to 20. The miss count carries over between alarms until then.
 - No skip. An alarm can't be enabled with zero registered objects.
 - **Fallback when the mission can't be done (owner approved):** after about 5 failed attempts on the same object, the app switches to a different registered object (random, not the one just failed). It cycles through all objects if needed. There is never a skip, so the owner always has to get up and photograph something. If only one object is registered, it stays on that object, which is why onboarding asks for at least 3.
 
 ### Stacked missions (owner requested 2026-11-06)
 
 - Each alarm has an ordered list, with each kind at most once. An alarm can leave photo out, and the editor warns that it could then be finished from bed.
-- All of them must be done, in order, while the alarm rings. The keep-ringing countdown starts after the last one.
-- **Steps, squats, shake:** counted with the motion sensors. The count starts over if the app is closed partway through.
-- **Math:** sums like 14 × 6 + 37. A wrong answer gets a new sum, so answers can't be found by guessing.
-- **Can't be completed:** if a sensor can't be used, or hasn't counted anything for 2 minutes, a button swaps that mission for 5 sums. (My call: this keeps the "mission can't be completed" anti-goal out, but waiting 2 minutes in bed does get out of walking.)
+- All of them must be done, in order. The keep-ringing countdown starts after the last one.
+- **Quiet during missions (per alarm, on by default):** starting a mission stops the sound, without stopping anything else. It stays stopped from one mission to the next. There's a switch on the mission screen for that one ring, which isn't saved. Leaving the app brings the sound back straight away.
+- **20 seconds of nothing:** a bar shows the time left, and any input starts it again: a key, the shutter, or a count. When it runs out the mission closes, the sound comes back and the list starts over from the first mission. Missions keep their place if the app is closed.
+- **Steps:** one for each second of movement, not real footsteps, from how much the accelerometer varies. Ten sharp jolts within 3 seconds freezes the count and vibrates, then 1 second later takes off 10 steps, and 1 second after that it carries on. Standing still for 3 seconds gives a nudge at no cost.
+- **Squats:** two fingers held on the screen for 2 seconds start the mission. Then each 2 seconds of movement counts once if the phone is upright and hasn't been twisted about, and it either moved hard enough or a whole down-and-up was seen. Movement that doesn't count gives a vibration. That second way of counting is ours and may need tuning.
+- **Shake:** a sharp change in the accelerometer, at most five a second, at one of five strengths per alarm. Stopping for 3 seconds vibrates and shows "paused", with nothing lost.
+- **Math:** seven difficulties per alarm, from 4 + 7 up to 240 × 35 + 1200. The default is like 24 × 7 + 35. A wrong answer clears the entry and keeps the same sum.
+- **Can't be completed:** if a sensor can't be used, or hasn't counted anything in 2 minutes of mission time, a button swaps that mission for 5 sums. (My call: this keeps the "mission can't be completed" anti-goal out, but waiting 2 minutes in bed does get out of walking.)
 - A photo mission with no usable objects is dropped from the list. If that leaves nothing, the alarm rings for the countdown.
 - A missed wake-up check restarts the whole list.
 - Only alarms with a photo mission need registered objects.
@@ -92,7 +97,7 @@ Flow approved by the owner from wireframes (`.superpowers/brainstorm/.../content
 
 ### Wake-up check (owner requested 2026-11-06)
 
-Off by default, set per alarm: 1 to 30 minutes after the ring stops.
+Off by default, set per alarm: 1, 3, 5, 7 or 10 minutes after the ring stops.
 
 - When the keep-ringing countdown ends the sound stops, and the app shows when the check will come. Nothing can be tapped until then.
 - At check time a quiet prompt appears (a normal notification sound, plus the prompt screen), with one button and **100 seconds** to answer.
@@ -104,11 +109,11 @@ Off by default, set per alarm: 1 to 30 minutes after the ring stops.
 
 ### Gentle wake-up (owner requested 2026-11-06)
 
-Off by default, set per alarm: 15, 30 or 60 seconds.
+Off by default, set per alarm: 15, 30 or 60 seconds, or 5 or 10 minutes.
 
-- The first ring starts at 5% of full level (never silent) and builds to full. System volume is still pushed to maximum; only the app's own level ramps.
+- The first ring starts at 5% of full level (never silent), stays low for a while, then rises quickly to full. System volume is still pushed to maximum; only the app's own level ramps. The ramp waits while a mission holds the sound back.
 - The ramp is timed from the alarm time, so reopening the app doesn't restart it, and a repeat ring after a missed check is full volume at once.
-- Backup notifications wait until the ramp has ended, otherwise they would blast at full volume over it. **Cost:** if the app was closed, the first sound comes up to 60 seconds late.
+- Backup notifications wait until the ramp has ended, otherwise they would blast at full volume over it, but never longer than 60 seconds if the app has been closed. **Cost:** if the app was closed, the first sound comes up to 60 seconds late, and a long ramp doesn't get to finish.
 
 ### Closing the app (owner requested 2026-11-06)
 
@@ -132,12 +137,13 @@ Swiping the app closed posts a notification about 2.5 seconds later saying so. T
 |---|---|
 | Silent switch / Focus | Alarm audio uses a playback audio session (ignores silent switch). Backup notifications use **critical alerts** (entitlement self-granted via TrollStore). |
 | App swiped closed / killed / phone rebooted overnight | **Backup critical-alert notifications** are pre-scheduled about every 30 seconds starting at alarm time. Tapping one opens the app straight into the ringing/mission screen. After a match, backups are rescheduled to end exactly when the countdown ends. Note the iOS limit of 64 pending local notifications. |
+| Ringing with the phone locked or in another app | Ten silent banners over the first minute, which light up the lock screen. Tapping one opens the ringing screen. |
 | App suspended before alarm time | Alarmy-style keep-alive: the app keeps a background audio session running while an alarm is armed so it can play the alarm itself at full control. |
 | Volume lowered | While ringing, the app pushes system volume back up. |
 | Earbuds or headphones connected | The ring goes to the phone's own speaker, including when they connect partway through. If iOS refuses, it rings through the current route rather than not at all. |
 | Power off | **Cannot be prevented.** Accepted. |
 | Changing the device clock to escape the lock or alarm | Known risk. The builder should make a reasonable effort, for example reacting to significant time-change notifications by not releasing locks. It doesn't have to be perfect. When the clock or time zone changes while the app is running, backups are rescheduled so they still fire at the real alarm time. |
-| Can't match in the dark | Flash, a lighting-tolerant matcher, and the strictness setting. Multiple reference shots per object are allowed (builder's call, see below). |
+| Can't match in the dark | Flash, a lighting-tolerant matcher, and a limit that rises with each miss. Multiple reference shots per object are allowed (builder's call, see below). |
 
 ## Visual design
 
@@ -151,7 +157,6 @@ Swiping the app closed posts a notification about 2.5 seconds later saying so. T
 - A small set of loud built-in alarm sounds. No custom sound import in v1.
 - 1–N reference photos per object, to improve matching across lighting.
 - Default lock window: 8 hours before the alarm.
-- Default strictness: medium. Tune on-device with the owner.
 - Show a "keep the phone charging overnight" hint, since the background keep-alive uses battery.
 - Exact matching technique, thresholds, notification cadence, and build/signing pipeline details (ldid vs TrollStore fakesign, `.tipa` vs `.ipa`).
 - Project structure, persistence (SwiftData isn't available on iOS 16. Use Codable files, UserDefaults, or Core Data).

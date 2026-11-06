@@ -13,6 +13,7 @@ struct AlarmyApp: App {
         }
         .onChange(of: scenePhase) { phase in
             if phase == .active { model.sceneBecameActive() }
+            if phase == .background { model.sceneWentToBackground() }
         }
     }
 }

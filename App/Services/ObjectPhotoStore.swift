@@ -1,7 +1,7 @@
 import UIKit
 import AlarmyCore
 
-/// Reference photos on disk: `<id>.jpg` for display and `<id>.fp` (feature print) for matching.
+/// Reference photos on disk: `<id>.jpg` for display and `<id>.fp2` (feature print of its middle) for matching.
 final class ObjectPhotoStore {
     enum StoreError: Error { case encoding }
 
@@ -21,7 +21,7 @@ final class ObjectPhotoStore {
         }
         let print = try matcher.featurePrint(for: cg)
         try jpeg.write(to: url(id, "jpg"), options: .atomic)
-        try print.write(to: url(id, "fp"), options: .atomic)
+        try print.write(to: url(id, "fp2"), options: .atomic)
         return id
     }
 
@@ -30,12 +30,25 @@ final class ObjectPhotoStore {
     }
 
     func featurePrint(_ id: UUID) -> Data? {
-        try? Data(contentsOf: url(id, "fp"))
+        if let print = try? Data(contentsOf: url(id, "fp2")) { return print }
+        // Saved by an older build, which printed the whole photo.
+        if let cg = image(id)?.cgImage, let print = try? matcher.featurePrint(for: cg) {
+            try? print.write(to: url(id, "fp2"), options: .atomic)
+            try? FileManager.default.removeItem(at: url(id, "fp"))
+            return print
+        }
+        return try? Data(contentsOf: url(id, "fp"))
+    }
+
+    /// Brings prints from an older build up to date, so it doesn't have to happen while ringing.
+    func refreshPrints(_ ids: [UUID]) {
+        for id in ids { _ = featurePrint(id) }
     }
 
     func delete(_ id: UUID) {
         try? FileManager.default.removeItem(at: url(id, "jpg"))
         try? FileManager.default.removeItem(at: url(id, "fp"))
+        try? FileManager.default.removeItem(at: url(id, "fp2"))
     }
 
     private func url(_ id: UUID, _ ext: String) -> URL {

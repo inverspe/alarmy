@@ -5,47 +5,54 @@ import AlarmyCore
 /// so there is nothing to swipe away.
 struct MorningFlowView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var showCamera = false
 
     var body: some View {
         if let session = model.state.ringSession {
             switch session.phase {
             case .mission:
-                switch session.currentMission?.kind {
-                case .steps, .squats, .shake:
-                    if let step = session.currentMission {
-                        CountedMissionView(session: session, step: step).id(step.kind)
-                    }
-                case .math:
-                    MathMissionView(session: session, sums: session.currentMission?.amount ?? 1) {
-                        model.completeMission(.math)
-                    }
-                case .photo, nil:
-                    if showCamera {
-                        MissionCameraView()
-                    } else {
-                        RingingView(session: session) { showCamera = true }
-                    }
+                if model.missionOpen {
+                    missionScreen(session)
+                } else {
+                    RingingView(session: session)
                 }
             case .countdown(let endsAt):
                 CountdownView(endsAt: endsAt,
                               total: TimeInterval(session.ringAfterMinutes) * 60,
                               hadMission: session.hadMissions)
             case .wakeCheckWaiting(let checkAt):
-                WakeCheckWaitingView(checkAt: checkAt).onAppear { showCamera = false }
+                WakeCheckWaitingView(checkAt: checkAt)
             case .wakeCheckPrompt(let deadline):
-                WakeCheckPromptView(deadline: deadline).onAppear { showCamera = false }
+                WakeCheckPromptView(deadline: deadline)
             case .finished:
                 Theme.night.ignoresSafeArea()
             }
         }
     }
+
+    @ViewBuilder
+    private func missionScreen(_ session: RingSession) -> some View {
+        switch session.currentMission?.kind {
+        case .steps, .squats, .shake:
+            if let step = session.currentMission {
+                CountedMissionView(session: session, step: step).id(step.kind)
+            }
+        case .math:
+            MathMissionView(session: session, sums: session.currentMission?.amount ?? 1,
+                            level: MathLevel(rawValue: session.currentMission?.level ?? 0) ?? .level5) {
+                model.completeMission(.math)
+            }
+        case .photo, nil:
+            MissionCameraView()
+        }
+    }
 }
 
+/// The alarm is sounding and nothing has started yet. The only thing to do is start the mission.
 struct RingingView: View {
     @EnvironmentObject private var model: AppModel
     let session: RingSession
-    let openCamera: () -> Void
+
+    private var kind: MissionKind { session.currentMission?.kind ?? .photo }
 
     var body: some View {
         let now = Calendar.current.dateComponents([.hour, .minute], from: model.now)
@@ -56,32 +63,25 @@ struct RingingView: View {
 
             MissionPositionLabel(session: session).padding(.top, 8)
 
-            Text(session.isEarlyClear
-                 ? "To clear your \(Theme.timeString(session.occurrence.fireDate)) alarm, go find"
-                 : "Go find")
-                .font(.system(size: 17, weight: .medium))
-                .padding(.top, 26)
-                .padding(.bottom, 4)
+            if model.missionTimedOut {
+                Text("Out of time. Start again.")
+                    .font(Theme.bodyStrong)
+                    .foregroundColor(Theme.siren)
+                    .padding(.top, 8)
+            }
 
-            Text(object?.name ?? "")
-                .font(Theme.display(40))
-                .lineLimit(2)
-                .minimumScaleFactor(0.6)
+            if kind == .photo {
+                photoHeading(object)
+            } else {
+                missionHeading(object)
+            }
 
-            Color.clear
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background {
-                    if let id = object?.referencePhotoIDs.first, let image = model.photos.image(id) {
-                        Image(uiImage: image).resizable().scaledToFill()
-                    } else {
-                        Theme.night.opacity(0.1)
-                    }
-                }
+            picture(object)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.photoRadius, style: .continuous))
                 .padding(.top, 18)
-                .accessibilityLabel("Reference photo of \(object?.name ?? "the object")")
 
-            PrimaryButton(title: "Open camera", background: Theme.night, foreground: Theme.sunlight, action: openCamera)
+            PrimaryButton(title: kind == .photo ? "Open camera" : "Start mission",
+                          background: Theme.night, foreground: Theme.sunlight) { model.openMission() }
                 .padding(.top, 18)
 
             if session.isEarlyClear {
@@ -95,5 +95,62 @@ struct RingingView: View {
         .padding(.horizontal, Theme.gutter)
         .padding(.bottom, 12)
         .background(Theme.sunlight.ignoresSafeArea())
+    }
+
+    @ViewBuilder
+    private func photoHeading(_ object: RegisteredObject?) -> some View {
+        Text(session.isEarlyClear
+             ? "To clear your \(Theme.timeString(session.occurrence.fireDate)) alarm, go find"
+             : "Go find")
+            .font(.system(size: 17, weight: .medium))
+            .padding(.top, 26)
+            .padding(.bottom, 4)
+
+        Text(object?.name ?? "")
+            .font(Theme.display(40))
+            .lineLimit(2)
+            .minimumScaleFactor(0.6)
+    }
+
+    @ViewBuilder
+    private func missionHeading(_ object: RegisteredObject?) -> some View {
+        Text(session.isEarlyClear
+             ? "To clear your \(Theme.timeString(session.occurrence.fireDate)) alarm"
+             : "Your mission")
+            .font(.system(size: 17, weight: .medium))
+            .padding(.top, 26)
+            .padding(.bottom, 4)
+
+        Text(session.currentMission.flatMap { $0.kind.amountText($0.amount) } ?? kind.title)
+            .font(Theme.display(40))
+            .lineLimit(2)
+            .minimumScaleFactor(0.6)
+
+        if let object {
+            Text("Later you'll need to photograph \(object.name). Going there first saves time.")
+                .font(Theme.caption)
+                .padding(.top, 4)
+        }
+    }
+
+    @ViewBuilder
+    private func picture(_ object: RegisteredObject?) -> some View {
+        if kind == .photo {
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background {
+                    if let id = object?.referencePhotoIDs.first, let image = model.photos.image(id) {
+                        Image(uiImage: image).resizable().scaledToFill()
+                    } else {
+                        Theme.night.opacity(0.1)
+                    }
+                }
+                .accessibilityLabel("Reference photo of \(object?.name ?? "the object")")
+        } else {
+            Theme.night.opacity(0.1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(Image(systemName: kind.symbol).font(.system(size: 96)))
+                .accessibilityHidden(true)
+        }
     }
 }

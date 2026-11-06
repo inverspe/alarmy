@@ -11,8 +11,11 @@ final class AlarmAudio {
         let sound: AlarmSound
         var rampStart: UInt64 = 0
         var rampDuration: TimeInterval = 0
+        /// When the sound was held back for a mission. The session stays running underneath.
+        var quietSince: UInt64?
 
         func level(at time: UInt64) -> Float {
+            guard quietSince == nil else { return 0 }
             guard rampDuration > 0 else { return 1 }
             let elapsed = time > rampStart ? Double(time - rampStart) / 1_000_000_000 : 0
             return GentleRamp.level(elapsed: elapsed, duration: rampDuration)
@@ -95,6 +98,23 @@ final class AlarmAudio {
         isRinging = true
         log.add("start ringing \(alarmSound.rawValue), gentle \(gentle.map { "\(Int($0.elapsed))/\(Int($0.duration)) s" } ?? "off"), options \(ringOptions.rawValue)")
         resume()
+    }
+
+    /// Holds the sound back without stopping anything. A ramp carries on from where it was.
+    func setQuiet(_ quiet: Bool) {
+        let now = clock_gettime_nsec_np(CLOCK_MONOTONIC)
+        let changed = ring.withLock { (current: inout Ring?) -> Bool in
+            guard var next = current, (next.quietSince != nil) != quiet else { return false }
+            if quiet {
+                next.quietSince = now
+            } else if let since = next.quietSince {
+                next.rampStart &+= now &- since
+                next.quietSince = nil
+            }
+            current = next
+            return true
+        }
+        if changed { log.add("ring \(quiet ? "held back for a mission" : "sounding again")") }
     }
 
     func stopRinging() {

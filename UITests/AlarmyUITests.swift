@@ -10,9 +10,10 @@ final class AlarmyUITests: XCTestCase {
     }
 
     private func launch(ring: String? = "now", missions: String = "photo", sensor: String = "count",
-                        wakeCheck: Int = 0, ringAfter: Int = 1, gentle: Int = 0) {
+                        wakeCheck: Int = 0, ringAfter: Int = 1, gentle: Int = 0, twoFinger: Bool = false) {
         app = XCUIApplication()
         var environment = ["ALARMY_UITEST_SENSOR": sensor]
+        if twoFinger { environment["ALARMY_UITEST_TWO_FINGER"] = "1" }
         if let ring {
             environment["ALARMY_UITEST_RING"] = ring
             environment["ALARMY_UITEST_MISSIONS"] = missions
@@ -39,16 +40,29 @@ final class AlarmyUITests: XCTestCase {
     private func answerSum(correctly: Bool = true, file: StaticString = #filePath, line: UInt = #line) {
         let problem = app.staticTexts["math-problem"]
         XCTAssertTrue(problem.waitForExistence(timeout: 10), "No sum on screen", file: file, line: line)
-        let numbers = problem.label.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap { Int($0) }
-        XCTAssertEqual(numbers.count, 3, "Couldn't read: \(problem.label)", file: file, line: line)
-        let answer = numbers[0] * numbers[1] + numbers[2] + (correctly ? 0 : 1)
+        let text = problem.label
+        let numbers = text.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap { Int($0) }
+        XCTAssertGreaterThanOrEqual(numbers.count, 2, "Couldn't read: \(text)", file: file, line: line)
+        let sum = text.contains("×")
+            ? numbers[0] * numbers[1] + numbers.dropFirst(2).reduce(0, +)
+            : numbers.reduce(0, +)
+        let answer = sum + (correctly ? 0 : 1)
         for digit in String(answer) { app.buttons[String(digit)].tap() }
         app.buttons["OK"].tap()
+    }
+
+    private func startMission(file: StaticString = #filePath, line: UInt = #line) {
+        let start = app.buttons["Start mission"]
+        XCTAssertTrue(start.waitForExistence(timeout: 10), "No way to start the mission", file: file, line: line)
+        start.tap()
     }
 
     /// Does math:2, steps:10, squats:5, shake:10, as far as the keep-ringing countdown.
     private func doFullStack(screenshots: Bool) {
         expect("Mission 1 of 4")
+        expect("Your mission")
+        if screenshots { shot("ring-screen") }
+        startMission()
         expect("Sum 1 of 2")
         if screenshots { shot("math") }
         answerSum()
@@ -91,17 +105,93 @@ final class AlarmyUITests: XCTestCase {
         shot("finished")
     }
 
-    func testWrongAnswerGetsANewSumAndDoesNotCount() {
+    func testWrongAnswerKeepsTheSameSumAndDoesNotCount() {
         launch(missions: "math:2")
+        startMission()
         expect("Sum 1 of 2")
         let first = app.staticTexts["math-problem"].label
         answerSum(correctly: false)
-        expect("Not quite. Here's a new one.")
+        expect("Not quite. Try again.")
         shot("math-wrong")
         expect("Sum 1 of 2")
-        XCTAssertNotEqual(app.staticTexts["math-problem"].label, first, "Same sum after a wrong answer")
+        XCTAssertEqual(app.staticTexts["math-problem"].label, first, "A different sum after a wrong answer")
+        sleep(1)
         answerSum()
         expect("Sum 2 of 2")
+    }
+
+    func testHardestSumsCanBeAnswered() {
+        launch(missions: "math:1:6")
+        startMission()
+        expect("Sum 1 of 1")
+        XCTAssertTrue(app.staticTexts["math-problem"].label.contains("×"))
+        shot("math-hardest")
+        answerSum()
+        expect("Mission done ✓")
+    }
+
+    func testAddingSumsCanBeAnswered() {
+        launch(missions: "math:1:3")
+        startMission()
+        expect("Sum 1 of 1")
+        XCTAssertFalse(app.staticTexts["math-problem"].label.contains("×"))
+        shot("math-adding")
+        answerSum()
+        expect("Mission done ✓")
+    }
+
+    /// With nothing happening, the mission closes after 20 seconds and the sound comes back.
+    func testRunningOutOfTimeStartsTheMissionsOver() {
+        launch(missions: "math:1,shake:10", sensor: "stuck")
+        startMission()
+        expect("Sum 1 of 1")
+        answerSum()
+        expect("Mission 2 of 2")
+        expect("Shake your phone")
+        let opened = Date()
+        XCTAssertTrue(app.buttons["Turn sound on"].exists, "Sound should be off during a mission")
+        shot("mission-quiet")
+
+        expect("Out of time. Start again.", within: 25)
+        XCTAssertGreaterThan(Date().timeIntervalSince(opened), 15, "Closed too soon")
+        expect("Mission 1 of 2")
+        shot("mission-timed-out")
+
+        startMission()
+        expect("Sum 1 of 1")
+    }
+
+    func testSoundCanBeSwitchedDuringAMission() {
+        launch(missions: "math:1")
+        startMission()
+        let on = app.buttons["Turn sound on"]
+        XCTAssertTrue(on.waitForExistence(timeout: 5))
+        on.tap()
+        let off = app.buttons["Turn sound off"]
+        XCTAssertTrue(off.waitForExistence(timeout: 5))
+        off.tap()
+        XCTAssertTrue(on.waitForExistence(timeout: 5))
+    }
+
+    func testTypingKeepsTheMissionOpen() {
+        launch(missions: "math:1")
+        startMission()
+        expect("Sum 1 of 1")
+        for _ in 0..<5 {
+            sleep(5)
+            app.buttons["1"].tap()
+        }
+        XCTAssertFalse(app.staticTexts["Out of time. Start again."].exists)
+        XCTAssertTrue(app.staticTexts["math-problem"].exists)
+    }
+
+    func testSquatsStartWithTwoFingers() {
+        launch(missions: "squats:5", sensor: "stuck", twoFinger: true)
+        startMission()
+        expect("Do your squats")
+        expect("Hold two fingers on the circles to start")
+        XCTAssertFalse(app.descendants(matching: .any)["mission-count"].exists, "Counting before the fingers are down")
+        shot("squats-two-fingers")
     }
 
     func testPhotoMissionScreenInAStack() {
@@ -121,6 +211,7 @@ final class AlarmyUITests: XCTestCase {
 
     func testNoSensorSwapsToSums() {
         launch(missions: "steps:10", sensor: "none")
+        startMission()
         let swap = app.buttons["This can't be counted. Do sums instead"]
         XCTAssertTrue(swap.waitForExistence(timeout: 10), "No way to finish without a sensor")
         shot("sensor-unavailable")
@@ -134,17 +225,28 @@ final class AlarmyUITests: XCTestCase {
         expect("Mission done ✓")
     }
 
+    /// Each try closes after 20 seconds, so the two minutes add up across tries.
     func testStuckSensorOffersSumsAfterTwoMinutes() {
         launch(missions: "squats:5", sensor: "stuck")
+        startMission()
         expect("Do your squats")
         let swap = app.buttons["Not counting? Do sums instead"]
         XCTAssertFalse(swap.exists, "Offered sums straight away")
-        XCTAssertTrue(swap.waitForExistence(timeout: 130), "Never offered a way out")
+        let start = app.buttons["Start mission"]
+        let began = Date()
+        while !swap.exists && Date().timeIntervalSince(began) < 170 {
+            if start.waitForExistence(timeout: 3) { start.tap() }
+        }
+        XCTAssertTrue(swap.exists, "Never offered a way out")
+        XCTAssertGreaterThan(Date().timeIntervalSince(began), 100, "Offered sums too soon")
         shot("sensor-stuck")
+        swap.tap()
+        expect("Sum 1 of 5")
     }
 
     func testClosingTheAppKeepsYourPlaceButRestartsTheCount() {
         launch(missions: "math:1,steps:10", sensor: "stuck")
+        startMission()
         expect("Sum 1 of 1")
         answerSum()
         expect("Mission 2 of 2")
@@ -152,6 +254,7 @@ final class AlarmyUITests: XCTestCase {
 
         launch(ring: nil, sensor: "stuck")
         expect("Mission 2 of 2")
+        startMission()
         expect("Start walking")
         let count = app.descendants(matching: .any)["mission-count"]
         XCTAssertTrue(count.waitForExistence(timeout: 5))
@@ -163,6 +266,7 @@ final class AlarmyUITests: XCTestCase {
     /// no earlier test (tests run alphabetically) finishes a counted mission, so it's still unanswered.
     func testCountingMissionDoesNotAskForMotionAccess() {
         launch(missions: "shake:10")
+        startMission()
         expect("Mission done ✓", within: 25)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         XCTAssertFalse(springboard.alerts.firstMatch.waitForExistence(timeout: 5), "A permission dialog covered the alarm")
@@ -174,11 +278,13 @@ final class AlarmyUITests: XCTestCase {
         let clear = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Up early?'")).firstMatch
         XCTAssertTrue(clear.waitForExistence(timeout: 10), "No early clear offered")
         clear.tap()
+        startMission()
         expect("Sum 1 of 1")
         shot("early-clear")
         app.buttons["Not now"].tap()
         XCTAssertTrue(clear.waitForExistence(timeout: 5))
         clear.tap()
+        startMission()
         answerSum()
         expect("Alarms")
         XCTAssertFalse(clear.exists, "Could clear the same alarm twice")
@@ -203,7 +309,10 @@ final class AlarmyUITests: XCTestCase {
         add.tap()
         app.buttons["Math"].firstMatch.tap()
         expectAmount("3 sums")
+        expect("Difficulty")
         shot("editor-three-missions")
+        XCTAssertTrue(app.switches["Vibrate"].exists, "No vibrate setting")
+        XCTAssertTrue(app.switches["Quiet during missions"].exists, "No quiet setting")
 
         let stepsAmount = app.steppers["50 steps"]
         scrollTo(stepsAmount)
@@ -245,8 +354,8 @@ final class AlarmyUITests: XCTestCase {
 
     /// The target may be above or below what's on screen.
     private func scrollTo(_ element: XCUIElement) {
-        for _ in 0..<5 where !element.isHittable { app.swipeUp(velocity: .slow) }
-        for _ in 0..<8 where !element.isHittable { app.swipeDown(velocity: .slow) }
+        for _ in 0..<8 where !element.isHittable { app.swipeUp(velocity: .slow) }
+        for _ in 0..<12 where !element.isHittable { app.swipeDown(velocity: .slow) }
         XCTAssertTrue(element.isHittable, "Couldn't reach \(element)")
     }
 }

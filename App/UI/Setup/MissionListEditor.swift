@@ -64,6 +64,17 @@ struct MissionListEditor: View {
                     Text(text).font(Theme.body.monospacedDigit()).foregroundColor(Theme.dusk)
                 }
             }
+            if let title = step.kind.levelTitle {
+                HStack {
+                    Text(title).font(Theme.body).foregroundColor(Theme.dusk)
+                    Spacer()
+                    Picker(title, selection: levelBinding(at: index)) {
+                        ForEach(0..<step.kind.levelCount, id: \.self) { Text(step.kind.levelName($0)).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(Theme.sunlight)
+                }
+            }
         }
         .padding(12)
         .background(Theme.nightSurface)
@@ -86,8 +97,11 @@ struct MissionListEditor: View {
         Binding(get: { missions[index].amount }, set: { missions[index].amount = $0 })
     }
 
+    private func levelBinding(at index: Int) -> Binding<Int> {
+        Binding(get: { missions[index].level }, set: { missions[index].level = $0 })
+    }
+
     private func add(_ kind: MissionKind) {
         missions.append(MissionStep(kind: kind))
-        if kind == .steps { MissionSensor.requestStepPermission() }
     }
 }

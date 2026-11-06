@@ -4,8 +4,7 @@ import AlarmyCore
 
 enum MissionResult {
     case matched
-    /// `lookedLike` is another registered object the photo resembled more than the requested one.
-    case miss(distance: Float, threshold: Float, switchedTo: RegisteredObject?, lookedLike: RegisteredObject?)
+    case miss(distance: Float, limit: Float, switchedTo: RegisteredObject?)
 }
 
 /// Owns the app state and drives the alarm: starts sessions when an alarm is due,
@@ -15,6 +14,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var state: AppState
     /// Trusted "now", refreshed every tick, so views that depend on time update.
     @Published private(set) var now = Date()
+    /// A mission screen is up. The sound stops while it is, unless the alarm says otherwise.
+    @Published private(set) var missionOpen = false
+    @Published private(set) var missionSecondsLeft = MissionAttempt.idleLimit
+    /// The last mission closed because nothing was happening.
+    @Published private(set) var missionTimedOut = false
+    /// The owner switched the sound on or off with the mission open. Lasts until the ring ends.
+    @Published private var missionQuietChoice: Bool?
 
     let audio = AlarmAudio()
     let volume = VolumeEnforcer()
@@ -30,6 +36,11 @@ final class AppModel: ObservableObject {
     private var planDirty = true
     private var modelRinging = false
     private var modelKeepAlive = false
+    private var missionAttempt: MissionAttempt?
+    /// Mission time without a count, kept across attempts because each one closes after 20 seconds.
+    private var stuckSeconds: [MissionKind: TimeInterval] = [:]
+    private var lastMissionTick: TimeInterval = 0
+    private var lastVibration: TimeInterval = 0
     /// Constant for the life of the process; a different value means the phone rebooted.
     private let bootID = AppModel.bootSessionID()
 
@@ -42,6 +53,10 @@ final class AppModel: ObservableObject {
         store = StateStore(fileURL: support.appendingPathComponent("state.json"))
         photos = ObjectPhotoStore(directory: support.appendingPathComponent("objects"))
         state = store.load()
+
+        let photoStore = photos
+        let photoIDs = state.objects.flatMap(\.referencePhotoIDs)
+        DispatchQueue.global(qos: .utility).async { photoStore.refreshPrints(photoIDs) }
 
         notifications.isRingingInForeground = { [weak self] in
             UIApplication.shared.applicationState == .active && (self?.state.ringSession?.isRinging ?? false)
@@ -117,6 +132,13 @@ final class AppModel: ObservableObject {
         tick()
     }
 
+    /// Nobody is looking at the mission any more, so the sound has to come back.
+    func sceneWentToBackground() {
+        guard missionOpen else { return }
+        closeMission()
+        tick()
+    }
+
     // MARK: Tick
 
     func tick() {
@@ -162,6 +184,7 @@ final class AppModel: ObservableObject {
         }
 
         if s != state { commit(s) }
+        syncMission()
         syncAudio()
 
         let ringing = state.ringSession?.isRinging ?? false
@@ -213,14 +236,54 @@ final class AppModel: ObservableObject {
     /// Backing out of an early clear is fine: nothing is ringing yet.
     func cancelEarlyClear() {
         guard let session = state.ringSession, session.isEarlyClear else { return }
+        closeMission()
+        stuckSeconds = [:]
         var s = state
         s.ringSession = nil
         commit(s)
     }
 
+    /// Starts the current mission. The chain then runs on from one mission to the next.
+    func openMission() {
+        guard state.ringSession?.phase == .mission else { return }
+        let time = Self.monotonic()
+        missionAttempt = MissionAttempt(now: time)
+        missionSecondsLeft = MissionAttempt.idleLimit
+        lastMissionTick = time
+        missionTimedOut = false
+        missionOpen = true
+        DiagnosticLog.shared.add("mission opened")
+        syncAudio()
+    }
+
+    /// Anything the owner does in a mission starts its time again.
+    func noteMissionInput() {
+        missionAttempt?.input(at: Self.monotonic())
+        missionSecondsLeft = MissionAttempt.idleLimit
+    }
+
+    /// The sensor counted something, so it's working.
+    func noteMissionProgress(_ kind: MissionKind) {
+        noteMissionInput()
+        stuckSeconds[kind] = 0
+    }
+
+    func isMissionStuck(_ kind: MissionKind) -> Bool {
+        stuckSeconds[kind, default: 0] >= MissionAttempt.stuckAfter
+    }
+
+    var isMissionSoundOn: Bool { !missionQuiet }
+
+    func toggleMissionSound() {
+        missionQuietChoice = !missionQuiet
+        noteMissionInput()
+        syncAudio()
+    }
+
     /// A steps, squats, shake or math mission was finished. Moves on to the next one.
     func completeMission(_ kind: MissionKind) {
         guard var session = state.ringSession, session.currentMission?.kind == kind else { return }
+        noteMissionInput()
         session.completeMission(now: trustedNow())
         var s = state
         s.ringSession = session
@@ -241,24 +304,21 @@ final class AppModel: ObservableObject {
 
     func submitMissionPhoto(_ image: UIImage) async -> MissionResult? {
         guard let session = state.ringSession, session.currentMission?.kind == .photo, let object = currentObject else { return nil }
+        noteMissionInput()
         let references = object.referencePhotoIDs.compactMap { photos.featurePrint($0) }
-        let others = state.objects.filter { $0.id != object.id }
-        let otherReferences = others.map { $0.referencePhotoIDs.compactMap { photos.featurePrint($0) } }
-        let strictness = state.strictness
+        let misses = state.photoMisses
         let matcher = self.matcher
         let evaluation = await Task.detached { () -> PhotoMatcher.MatchResult in
             guard let cg = image.normalized(maxSide: 1280).cgImage,
-                  let result = try? matcher.evaluate(cg, target: references, others: otherReferences, strictness: strictness) else {
-                return PhotoMatcher.MatchResult(matched: false, distance: .infinity, threshold: PhotoMatcher.threshold(for: strictness),
-                                                closestOther: nil, closestOtherIndex: nil)
+                  let result = try? matcher.evaluate(cg, references: references, misses: misses) else {
+                return PhotoMatcher.MatchResult(matched: false, distance: .infinity, limit: PhotoMatcher.limit(misses: misses))
             }
             return result
         }.value
-        let lookedLike = evaluation.matched ? nil : evaluation.closestOtherIndex
-            .flatMap { index in (evaluation.closestOther ?? .infinity) <= evaluation.distance ? others[index] : nil }
-        DiagnosticLog.shared.add(String(format: "mission %@: %@ score %.2f (needs <= %.2f), closest other %@",
+        noteMissionInput()
+        DiagnosticLog.shared.add(String(format: "mission %@: %@ score %.2f (needs under %.2f, %d misses)",
                                         object.name, evaluation.matched ? "match" : "miss", evaluation.distance,
-                                        evaluation.threshold, evaluation.closestOther.map { String(format: "%.2f", $0) } ?? "none"))
+                                        evaluation.limit, misses))
 
         // The session may have moved on while matching (e.g. fire time passed for an early clear).
         guard var current = state.ringSession, current.occurrence == session.occurrence, current.currentMission?.kind == .photo else {
@@ -266,6 +326,7 @@ final class AppModel: ObservableObject {
         }
         var s = state
         if evaluation.matched {
+            s.photoMisses = 0
             current.completeMission(now: trustedNow())
             s.ringSession = current
             commit(s)
@@ -273,11 +334,12 @@ final class AppModel: ObservableObject {
             return .matched
         }
         let before = current.currentObjectID
+        s.photoMisses += 1
         current.recordMiss(availableObjectIDs: usableObjectIDs(in: s), using: &rng)
         s.ringSession = current
         commit(s)
         let switched = current.currentObjectID != before ? state.objects.first { $0.id == current.currentObjectID } : nil
-        return .miss(distance: evaluation.distance, threshold: evaluation.threshold, switchedTo: switched, lookedLike: lookedLike)
+        return .miss(distance: evaluation.distance, limit: evaluation.limit, switchedTo: switched)
     }
 
     func addObject(name: String, photos images: [UIImage]) throws -> Bool {
@@ -288,17 +350,17 @@ final class AppModel: ObservableObject {
         return added
     }
 
-    /// The existing object these photos look most like, when close enough to be confused
-    /// with it at Medium strictness. Look-alike objects make the morning photo unreliable.
+    /// The existing object these photos look most like, when close enough to pass for it
+    /// on the first try. Look-alike objects make the morning photo unreliable.
     func lookalike(for images: [UIImage]) -> RegisteredObject? {
         let prints = images.compactMap { $0.normalized(maxSide: 1280).cgImage }.compactMap { try? matcher.featurePrint(for: $0) }
-        let limit = PhotoMatcher.threshold(for: .medium)
+        let limit = PhotoMatcher.limit(misses: 0)
         var best: (object: RegisteredObject, distance: Float)?
         for object in state.objects {
             let references = object.referencePhotoIDs.compactMap { photos.featurePrint($0) }
             for print in prints {
                 guard let d = try? matcher.distance(fromPrint: print, toReferences: references),
-                      d <= limit, d < (best?.distance ?? .infinity) else { continue }
+                      d < limit, d < (best?.distance ?? .infinity) else { continue }
                 best = (object, d)
             }
         }
@@ -330,6 +392,7 @@ final class AppModel: ObservableObject {
     // MARK: Private
 
     private func finish(_ session: RingSession, in s: inout AppState, at t: Date) {
+        stuckSeconds = [:]
         s.completed = Completion.markFinished(session.occurrence, at: t, alarms: s.alarms,
                                               completed: s.completed, calendar: calendar)
         if let i = s.alarms.firstIndex(where: { $0.id == session.occurrence.alarmID }), s.alarms[i].repeatDays.isEmpty {
@@ -340,6 +403,42 @@ final class AppModel: ObservableObject {
 
     private func usableObjectIDs(in s: AppState) -> [UUID] {
         s.objects.filter { object in object.referencePhotoIDs.contains { photos.featurePrint($0) != nil } }.map(\.id)
+    }
+
+    /// Closes a mission that has ended or run out of time.
+    private func syncMission() {
+        guard missionOpen else { return }
+        guard let session = state.ringSession, session.phase == .mission, let attempt = missionAttempt else {
+            closeMission()
+            return
+        }
+        let time = Self.monotonic()
+        if let kind = session.currentMission?.kind, kind != .photo, kind != .math {
+            stuckSeconds[kind, default: 0] += max(0, time - lastMissionTick)
+        }
+        lastMissionTick = time
+        missionSecondsLeft = attempt.remaining(at: time)
+        guard attempt.timedOut(at: time) else { return }
+
+        DiagnosticLog.shared.add("mission ran out of time")
+        closeMission()
+        missionTimedOut = true
+        var restarted = session
+        restarted.restartMissions()
+        var s = state
+        s.ringSession = restarted
+        commit(s)
+    }
+
+    private func closeMission() {
+        missionOpen = false
+        missionAttempt = nil
+    }
+
+    /// True while the sound should be held back for an open mission.
+    private var missionQuiet: Bool {
+        guard missionOpen, state.ringSession?.isRinging == true else { return false }
+        return missionQuietChoice ?? sessionOccurrence?.alarm.quietDuringMissions ?? true
     }
 
     /// Only acts on transitions, so it never fights audio started elsewhere (e.g. sound previews).
@@ -354,6 +453,15 @@ final class AppModel: ObservableObject {
                 audio.stopRinging()
                 volume.stop()
                 notifications.clearDelivered()
+                missionQuietChoice = nil
+            }
+        }
+        audio.setQuiet(missionQuiet)
+        if ringing, !missionOpen, sessionOccurrence?.alarm.vibrate ?? true {
+            let time = Self.monotonic()
+            if time - lastVibration >= 0.9 {
+                lastVibration = time
+                Haptics.vibrate()
             }
         }
         var answering = false

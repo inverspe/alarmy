@@ -11,6 +11,9 @@ enum UITestHarness {
     /// "count" counts on its own, "none" acts as if there's no sensor, "stuck" never counts.
     static var sensorMode: String? { environment["ALARMY_UITEST_SENSOR"] }
 
+    /// Squats normally skip the two-finger start here, as a test can't hold two fingers down.
+    static var wantsTwoFingerStart: Bool { environment["ALARMY_UITEST_TWO_FINGER"] == "1" }
+
     /// `ALARMY_UITEST_RING` says when the alarm goes off: now, soon or later.
     /// Without it nothing is touched, so a relaunch carries on from the saved state.
     static func seedIfRequested(support: URL) {
@@ -31,13 +34,13 @@ enum UITestHarness {
         environment["ALARMY_UITEST_\(name)"].flatMap(Int.init) ?? fallback
     }
 
-    /// "math:2,steps:10,photo".
+    /// "math:2,steps:10,photo", with an optional level after the amount: "math:2:6".
     private static func missions() -> [MissionStep] {
         let text = environment["ALARMY_UITEST_MISSIONS"] ?? "photo"
         return text.split(separator: ",").compactMap { item in
             let parts = item.split(separator: ":")
             guard let name = parts.first, let kind = MissionKind(rawValue: String(name)) else { return nil }
-            return MissionStep(kind: kind, amount: parts.count > 1 ? Int(parts[1]) : nil)
+            return MissionStep(kind: kind, amount: parts.count > 1 ? Int(parts[1]) : nil, level: parts.count > 2 ? Int(parts[2]) : nil)
         }
     }
 
@@ -50,7 +53,7 @@ enum UITestHarness {
             context.fill(CGRect(x: 0, y: 0, width: 300, height: 400))
         }
         try? picture.write(to: directory.appendingPathComponent("\(id.uuidString).jpg"))
-        try? Data([0]).write(to: directory.appendingPathComponent("\(id.uuidString).fp"))
+        try? Data([0]).write(to: directory.appendingPathComponent("\(id.uuidString).fp2"))
         return RegisteredObject(name: "Test object", referencePhotoIDs: [id])
     }
 }
