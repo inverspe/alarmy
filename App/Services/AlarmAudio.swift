@@ -80,7 +80,7 @@ final class AlarmAudio {
             next.rampStart = now > elapsedNanos ? now - elapsedNanos : 0
             next.rampDuration = gentle.duration
         }
-        ring.withLock { $0 = next }
+        ring.withLock { [next] in $0 = next }
         isRinging = true
         log.add("start ringing \(alarmSound.rawValue), gentle \(gentle.map { "\(Int($0.elapsed))/\(Int($0.duration)) s" } ?? "off"), options \(ringOptions.rawValue)")
         resume()

@@ -57,13 +57,13 @@ final class AlarmyUITests: XCTestCase {
         expect("Mission 2 of 4")
         expect("Start walking")
         if screenshots { shot("steps") }
-        expect("Mission 3 of 4", within: 15)
+        expect("Mission 3 of 4", within: 25)
         expect("Do your squats")
         if screenshots { shot("squats") }
-        expect("Mission 4 of 4", within: 15)
+        expect("Mission 4 of 4", within: 25)
         expect("Shake your phone")
         if screenshots { shot("shake") }
-        expect("Mission done ✓", within: 15)
+        expect("Mission done ✓", within: 25)
     }
 
     func testFullMorningWithAMissedCheck() {
@@ -188,19 +188,27 @@ final class AlarmyUITests: XCTestCase {
 
         add.tap()
         app.buttons["Steps"].firstMatch.tap()
-        expect("50 steps")
+        expectAmount("50 steps")
         scrollTo(add)
         add.tap()
         app.buttons["Math"].firstMatch.tap()
-        expect("3 sums")
+        expectAmount("3 sums")
         shot("editor-three-missions")
 
-        app.steppers.firstMatch.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(app.buttons["Move Math up"].isEnabled)
-        app.buttons["Move Math up"].tap()
-        XCTAssertFalse(app.buttons["Move Photo up"].isEnabled, "Photo should still be first")
+        let stepsAmount = app.steppers["50 steps"]
+        scrollTo(stepsAmount)
+        stepsAmount.buttons["Increment"].tap()
+        expectAmount("60 steps")
 
-        app.buttons["Remove Photo"].tap()
+        let mathUp = app.buttons["Move Math up"]
+        scrollTo(mathUp)
+        mathUp.tap()
+        XCTAssertFalse(app.buttons["Move Photo up"].isEnabled, "Photo should still be first")
+        shot("editor-reordered")
+
+        let removePhoto = app.buttons["Remove Photo"]
+        scrollTo(removePhoto)
+        removePhoto.tap()
         expect("Without a photo mission, you could finish this alarm from bed.")
         XCTAssertFalse(app.buttons["Remove Photo"].exists)
         shot("editor-no-photo")
@@ -213,17 +221,22 @@ final class AlarmyUITests: XCTestCase {
         // Saved and still there when reopened.
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.tap()
-        expect("3 sums")
+        expectAmount("3 sums")
+        expectAmount("60 steps")
         XCTAssertTrue(app.buttons["Remove Math"].exists)
         XCTAssertFalse(app.buttons["Remove Photo"].exists)
+        shot("editor-reopened")
     }
 
+    /// An amount is the label of its stepper, not separate text.
+    private func expectAmount(_ text: String, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(app.steppers[text].waitForExistence(timeout: 5), "Never saw: \(text)", file: file, line: line)
+    }
+
+    /// The target may be above or below what's on screen.
     private func scrollTo(_ element: XCUIElement) {
-        var tries = 0
-        while !element.isHittable && tries < 6 {
-            app.swipeUp(velocity: .slow)
-            tries += 1
-        }
+        for _ in 0..<5 where !element.isHittable { app.swipeUp(velocity: .slow) }
+        for _ in 0..<8 where !element.isHittable { app.swipeDown(velocity: .slow) }
         XCTAssertTrue(element.isHittable, "Couldn't reach \(element)")
     }
 }

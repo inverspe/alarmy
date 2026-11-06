@@ -51,7 +51,7 @@ final class MissionSensor: ObservableObject {
         case "none":
             unavailable = true
         case "count":
-            fakeTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+            fakeTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
                 guard let self else { return }
                 self.update(self.count + 1)
             }

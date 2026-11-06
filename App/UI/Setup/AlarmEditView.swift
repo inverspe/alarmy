@@ -42,6 +42,7 @@ struct AlarmEditView: View {
                             }
                             .pickerStyle(.menu)
                             .tint(Theme.dusk)
+                            .fixedSize()
                             Button { model.previewSound(alarm.sound) } label: { Image(systemName: "play.circle.fill") }
                                 .font(.system(size: 24))
                                 .foregroundColor(Theme.sunlight)
