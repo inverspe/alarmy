@@ -61,13 +61,21 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
         center.removeAllPendingNotificationRequests()
         for item in plan {
             let content = UNMutableNotificationContent()
-            content.title = "Alarm"
-            content.body = "Open Alarmy to do your mission."
-            content.sound = BackupSounds.notificationSound(soundFor(item.occurrence), critical: critical)
+            switch item.kind {
+            case .alarm:
+                content.title = "Alarm"
+                content.body = "Open Alarmy to do your mission."
+                content.sound = BackupSounds.notificationSound(soundFor(item.occurrence), critical: critical)
+            case .wakeCheck:
+                content.title = "Still up?"
+                content.body = "Tap now to confirm, or the alarm and your mission start over."
+                content.sound = .default
+            }
             content.interruptionLevel = .critical
             content.userInfo = [
                 "alarmID": item.occurrence.alarmID.uuidString,
                 "fireDate": item.occurrence.fireDate.timeIntervalSince1970,
+                "kind": item.kind.rawValue,
             ]
             let components = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: item.fireDate)
             let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
@@ -79,8 +87,25 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
         center.removeAllDeliveredNotifications()
     }
 
+    /// Tells the owner right away that they closed the app. Pending backups carry on regardless,
+    /// but they can't ring through the silent switch the way the running app can.
+    func postAppClosedNotice(ringing: Bool) {
+        let content = UNMutableNotificationContent()
+        content.title = ringing ? "The alarm isn't over" : "Alarmy was closed"
+        content.body = ringing
+            ? "Closing the app doesn't stop it. Open Alarmy to do your mission."
+            : "Open it again so your alarm can ring at full volume, even in silent mode."
+        content.sound = .default
+        content.interruptionLevel = .critical
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        center.add(UNNotificationRequest(identifier: "app-closed", content: content, trigger: trigger))
+    }
+
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        if notification.request.content.userInfo["kind"] as? String == PlannedNotification.Kind.wakeCheck.rawValue {
+            return [.sound]
+        }
         let suppress = await MainActor.run { isRingingInForeground() }
         return suppress ? [] : [.banner, .sound]
     }

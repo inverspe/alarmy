@@ -47,7 +47,7 @@ struct CountdownView: View {
                 Text(hadMission ? "Mission done ✓" : "No objects to find, so it just rings")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(Theme.sunlight)
-                Text(format(remaining))
+                Text(Theme.countdown(remaining))
                     .font(Theme.clock(92))
                     .foregroundColor(Theme.moon)
                     .padding(.top, 18)
@@ -64,10 +64,5 @@ struct CountdownView: View {
             .padding(.horizontal, Theme.gutter)
             .padding(.top, 20)
         }
-    }
-
-    private func format(_ seconds: TimeInterval) -> String {
-        let s = Int(seconds.rounded(.up))
-        return String(format: "%d:%02d", s / 60, s % 60)
     }
 }

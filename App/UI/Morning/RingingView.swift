@@ -20,6 +20,10 @@ struct MorningFlowView: View {
                 CountdownView(endsAt: endsAt,
                               total: TimeInterval(session.ringAfterMinutes) * 60,
                               hadMission: session.currentObjectID != nil)
+            case .wakeCheckWaiting(let checkAt):
+                WakeCheckWaitingView(checkAt: checkAt).onAppear { showCamera = false }
+            case .wakeCheckPrompt(let deadline):
+                WakeCheckPromptView(deadline: deadline).onAppear { showCamera = false }
             case .finished:
                 Theme.night.ignoresSafeArea()
             }
@@ -41,7 +45,7 @@ struct RingingView: View {
 
             Text(session.isEarlyClear
                  ? "To clear your \(Theme.timeString(session.occurrence.fireDate)) alarm, go find"
-                 : "Go find")
+                 : session.missedWakeChecks > 0 ? "You missed your check. Go find" : "Go find")
                 .font(.system(size: 17, weight: .medium))
                 .padding(.top, 26)
                 .padding(.bottom, 4)

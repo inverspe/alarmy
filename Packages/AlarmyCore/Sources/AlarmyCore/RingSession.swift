@@ -29,14 +29,38 @@ public struct RingSession: Codable, Equatable {
     private var gentleSecondsStored: Int?
     private var missedWakeChecksStored: Int?
 
-    public var isRinging: Bool { !isEarlyClear && phase != .finished }
-    public var isAwaitingWakeCheck: Bool { false }
-    public var missedWakeChecks: Int { 0 }
-    public var wakeCheckMinutes: Int { 0 }
-    /// When the first ring reaches full volume. Nil once it is at full volume for good.
-    public var gentleEndsAt: Date? { nil }
+    public var isRinging: Bool {
+        guard !isEarlyClear else { return false }
+        switch phase {
+        case .mission, .countdown: return true
+        case .wakeCheckWaiting, .wakeCheckPrompt, .finished: return false
+        }
+    }
 
-    public func ringLevel(now: Date) -> Float { 1 }
+    public var isAwaitingWakeCheck: Bool {
+        switch phase {
+        case .wakeCheckWaiting, .wakeCheckPrompt: return true
+        case .mission, .countdown, .finished: return false
+        }
+    }
+
+    public var missedWakeChecks: Int { missedWakeChecksStored ?? 0 }
+    public var wakeCheckMinutes: Int { wakeCheckMinutesStored ?? 0 }
+
+    /// No new ring starts from this moment on.
+    private var hardCapDate: Date { occurrence.fireDate.addingTimeInterval(Schedule.hardCap) }
+
+    /// When the first ring reaches full volume. Nil once it is at full volume for good.
+    public var gentleEndsAt: Date? {
+        guard let seconds = gentleSecondsStored, seconds > 0 else { return nil }
+        return occurrence.fireDate.addingTimeInterval(TimeInterval(seconds))
+    }
+
+    public func ringLevel(now: Date) -> Float {
+        guard let end = gentleEndsAt else { return 1 }
+        return GentleRamp.level(elapsed: now.timeIntervalSince(occurrence.fireDate),
+                                duration: end.timeIntervalSince(occurrence.fireDate))
+    }
 
     /// With no usable objects there is no mission: it rings for the countdown and then
     /// stops, so it can never ring forever.
@@ -87,6 +111,8 @@ public struct RingSession: Codable, Equatable {
 
     /// The owner answered the wake-up check.
     public mutating func confirmAwake() {
+        guard case .wakeCheckPrompt = phase else { return }
+        phase = .finished
     }
 
     public mutating func tick(now: Date) {
@@ -94,16 +120,46 @@ public struct RingSession: Codable, Equatable {
         tick(now: now, availableObjectIDs: [], using: &unused)
     }
 
-    /// Ends the countdown when it runs out. An unfinished mission gives up at the
-    /// hard cap, so a mission that can't be completed never rings forever.
+    /// Moves on when a phase's time is up, catching up through several phases at once if the
+    /// app was closed. An unfinished mission gives up at the hard cap, so a mission that
+    /// can't be completed never rings forever.
     public mutating func tick(now: Date, availableObjectIDs: [UUID], using rng: inout some RandomNumberGenerator) {
-        switch phase {
-        case .countdown(let endsAt) where now >= endsAt:
-            phase = .finished
-        case .mission where now >= occurrence.fireDate.addingTimeInterval(Schedule.hardCap):
-            phase = .finished
-        default:
-            break
+        while true {
+            switch phase {
+            case .countdown(let endsAt) where now >= endsAt:
+                if wakeCheckMinutes > 0 && endsAt < hardCapDate {
+                    phase = .wakeCheckWaiting(checkAt: endsAt.addingTimeInterval(TimeInterval(wakeCheckMinutes) * 60))
+                } else {
+                    phase = .finished
+                }
+            case .wakeCheckWaiting(let checkAt) where now >= checkAt:
+                phase = .wakeCheckPrompt(deadline: checkAt.addingTimeInterval(Self.wakeCheckResponseTime))
+            case .wakeCheckPrompt(let deadline) where now >= deadline:
+                startOver(now: now, availableObjectIDs: availableObjectIDs, using: &rng)
+                return
+            case .mission where now >= hardCapDate:
+                phase = .finished
+            default:
+                return
+            }
         }
+    }
+
+    /// A missed wake-up check: ring again at full volume and do the mission again,
+    /// on a different object when there is one.
+    private mutating func startOver(now: Date, availableObjectIDs: [UUID], using rng: inout some RandomNumberGenerator) {
+        guard now < hardCapDate else {
+            phase = .finished
+            return
+        }
+        missedWakeChecksStored = missedWakeChecks + 1
+        gentleSecondsStored = nil
+        missesOnCurrent = 0
+        let others = availableObjectIDs.filter { $0 != currentObjectID }
+        currentObjectID = others.randomElement(using: &rng) ?? currentObjectID
+        triedObjectIDs = currentObjectID.map { [$0] } ?? []
+        phase = currentObjectID == nil
+            ? .countdown(endsAt: now.addingTimeInterval(TimeInterval(ringAfterMinutes) * 60))
+            : .mission
     }
 }

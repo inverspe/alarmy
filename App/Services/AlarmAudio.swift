@@ -5,8 +5,22 @@ import os
 /// Plays the alarm tone, and keeps the app alive in the background by running
 /// the audio engine (rendering silence) while any alarm is armed.
 final class AlarmAudio {
+    /// What the render callback plays. A ramp is timed on the monotonic clock, so nothing
+    /// that restarts the audio engine can restart the ramp.
+    private struct Ring {
+        let sound: AlarmSound
+        var rampStart: UInt64 = 0
+        var rampDuration: TimeInterval = 0
+
+        func level(at time: UInt64) -> Float {
+            guard rampDuration > 0 else { return 1 }
+            let elapsed = time > rampStart ? Double(time - rampStart) / 1_000_000_000 : 0
+            return GentleRamp.level(elapsed: elapsed, duration: rampDuration)
+        }
+    }
+
     private var engine = AVAudioEngine()
-    private let sound = OSAllocatedUnfairLock<AlarmSound?>(initialState: nil)
+    private let ring = OSAllocatedUnfairLock<Ring?>(initialState: nil)
     private var keepAlive = false
     private(set) var isRinging = false
     private let log = DiagnosticLog.shared
@@ -57,15 +71,23 @@ final class AlarmAudio {
         if (keepAlive || isRinging) && !engine.isRunning { resume() }
     }
 
-    func startRinging(_ alarmSound: AlarmSound) {
-        sound.withLock { $0 = alarmSound }
+    /// `gentle` builds up to full volume over `duration` seconds, `elapsed` of which have already passed.
+    func startRinging(_ alarmSound: AlarmSound, gentle: (elapsed: TimeInterval, duration: TimeInterval)? = nil) {
+        var next = Ring(sound: alarmSound)
+        if let gentle {
+            let elapsedNanos = UInt64(max(0, gentle.elapsed) * 1_000_000_000)
+            let now = clock_gettime_nsec_np(CLOCK_MONOTONIC)
+            next.rampStart = now > elapsedNanos ? now - elapsedNanos : 0
+            next.rampDuration = gentle.duration
+        }
+        ring.withLock { $0 = next }
         isRinging = true
-        log.add("start ringing \(alarmSound.rawValue), options \(ringOptions.rawValue)")
+        log.add("start ringing \(alarmSound.rawValue), gentle \(gentle.map { "\(Int($0.elapsed))/\(Int($0.duration)) s" } ?? "off"), options \(ringOptions.rawValue)")
         resume()
     }
 
     func stopRinging() {
-        sound.withLock { $0 = nil }
+        ring.withLock { $0 = nil }
         isRinging = false
         if keepAlive { resume() } else { shutDown() }
     }
@@ -74,14 +96,15 @@ final class AlarmAudio {
         let rate = engine.outputNode.inputFormat(forBus: 0).sampleRate
         let sampleRate = rate > 0 ? rate : 44_100
         guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else { return }
-        let sound = self.sound
+        let ring = self.ring
         var t = 0.0
         let step = 1 / sampleRate
         let node = AVAudioSourceNode(format: format) { _, _, frameCount, bufferList -> OSStatus in
             let buffers = UnsafeMutableAudioBufferListPointer(bufferList)
-            let current = sound.withLock { $0 }
+            let current = ring.withLock { $0 }
+            let level = current?.level(at: clock_gettime_nsec_np(CLOCK_MONOTONIC)) ?? 0
             for frame in 0..<Int(frameCount) {
-                let value: Float = current.map { ToneGenerator.sample($0, at: t) } ?? 0
+                let value: Float = current.map { ToneGenerator.sample($0.sound, at: t) * level } ?? 0
                 t += step
                 for buffer in buffers {
                     buffer.mData?.assumingMemoryBound(to: Float.self)[frame] = value

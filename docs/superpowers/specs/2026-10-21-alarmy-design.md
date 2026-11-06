@@ -79,6 +79,30 @@ Flow approved by the owner from wireframes (`.superpowers/brainstorm/.../content
 - X is configurable per alarm, defaulting to 10 minutes. It starts at the moment of a successful match.
 - The alarm sound continues during the countdown. When it reaches 0, everything stops and the alarm is done for the day.
 
+### Wake-up check (owner requested 2026-11-06)
+
+Off by default, set per alarm: 1 to 30 minutes after the ring stops.
+
+- When the keep-ringing countdown ends the sound stops, and the app shows when the check will come. Nothing can be tapped until then.
+- At check time a quiet prompt appears (a normal notification sound, plus the prompt screen), with one button and **100 seconds** to answer.
+- Answered: the alarm is done for the day.
+- Not answered: the alarm rings again at full volume and the mission starts over with a different object if there is one. After that mission and countdown, the check comes again.
+- The edit lock stays on throughout. There is no way to turn the check off once it has started (my call: a sleepy owner would use one).
+- If the app is closed, the prompt and the repeat ring are pre-scheduled notifications.
+- No new ring starts past the hard cap (alarm time + 2 hours).
+
+### Gentle wake-up (owner requested 2026-11-06)
+
+Off by default, set per alarm: 15, 30 or 60 seconds.
+
+- The first ring starts at 5% of full level (never silent) and builds to full. System volume is still pushed to maximum; only the app's own level ramps.
+- The ramp is timed from the alarm time, so reopening the app doesn't restart it, and a repeat ring after a missed check is full volume at once.
+- Backup notifications wait until the ramp has ended, otherwise they would blast at full volume over it. **Cost:** if the app was closed, the first sound comes up to 60 seconds late.
+
+### Closing the app (owner requested 2026-11-06)
+
+Swiping the app closed posts a notification straight away saying so. iOS doesn't guarantee this runs every time, and the backups continue either way.
+
 ### Edit lock
 
 - Configurable per alarm: "lock edits N hours before the alarm" (the owner said "a configurable time").

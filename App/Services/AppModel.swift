@@ -60,6 +60,10 @@ final class AppModel: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            // Must run before the process exits, so it can't wait for a Task.
+            MainActor.assumeIsolated { self?.appWillTerminate() }
+        }
         tick()
     }
 
@@ -126,11 +130,17 @@ final class AppModel: ObservableObject {
         if s.ringSession == nil,
            let due = Schedule.activeOccurrence(s.alarms, completed: s.completed, now: t, calendar: calendar) {
             s.ringSession = RingSession.start(occurrence: due.key, ringAfterMinutes: due.alarm.ringAfterMinutes,
-                                              isEarlyClear: false, objectIDs: usableObjectIDs(in: s), now: t, using: &rng)
+                                              isEarlyClear: false, objectIDs: usableObjectIDs(in: s),
+                                              wakeCheckMinutes: due.alarm.wakeCheckMinutes, gentleSeconds: due.alarm.gentleSeconds,
+                                              now: t, using: &rng)
         }
 
         if var session = s.ringSession {
-            session.tick(now: t)
+            // Finding usable objects reads files, so it only happens when a missed check needs a new one.
+            var probe = session
+            probe.tick(now: t)
+            let startingOver = probe.missedWakeChecks > session.missedWakeChecks
+            session.tick(now: t, availableObjectIDs: startingOver ? usableObjectIDs(in: s) : [], using: &rng)
             if session.phase == .finished {
                 finish(session, in: &s, at: t)
             } else {
@@ -192,6 +202,17 @@ final class AppModel: ObservableObject {
         var s = state
         s.ringSession = nil
         commit(s)
+    }
+
+    /// The owner answered the wake-up check, which ends the alarm for today.
+    func confirmAwake() {
+        guard var session = state.ringSession else { return }
+        session.confirmAwake()
+        var s = state
+        s.ringSession = session
+        commit(s)
+        notifications.clearDelivered()
+        tick()
     }
 
     func submitMissionPhoto(_ image: UIImage) async -> MissionResult? {
@@ -303,21 +324,37 @@ final class AppModel: ObservableObject {
         if ringing != modelRinging {
             modelRinging = ringing
             if ringing {
-                audio.startRinging(sessionOccurrence?.alarm.sound ?? .klaxon)
+                audio.startRinging(sessionOccurrence?.alarm.sound ?? .klaxon, gentle: gentleProgress())
                 volume.start()
             } else {
                 audio.stopRinging()
                 volume.stop()
                 notifications.clearDelivered()
             }
-            UIApplication.shared.isIdleTimerDisabled = ringing
         }
+        var answering = false
+        if case .wakeCheckPrompt = state.ringSession?.phase { answering = true }
+        UIApplication.shared.isIdleTimerDisabled = ringing || answering
         let armed = state.alarms.contains(where: \.isEnabled)
         if armed != modelKeepAlive {
             modelKeepAlive = armed
             armed ? audio.startKeepAlive() : audio.stopKeepAlive()
         }
         audio.ensureRunning()
+    }
+
+    /// Counted from the alarm time, so reopening the app partway through doesn't start the ramp over.
+    private func gentleProgress() -> (elapsed: TimeInterval, duration: TimeInterval)? {
+        guard let session = state.ringSession, let end = session.gentleEndsAt else { return nil }
+        let fire = session.occurrence.fireDate
+        return (now.timeIntervalSince(fire), end.timeIntervalSince(fire))
+    }
+
+    private func appWillTerminate() {
+        let active = state.ringSession.map { !$0.isEarlyClear && $0.phase != .finished } ?? false
+        guard active || state.alarms.contains(where: \.isEnabled) else { return }
+        DiagnosticLog.shared.add("app closed, active session=\(active)")
+        notifications.postAppClosedNotice(ringing: active)
     }
 
     private func replan(at t: Date) {

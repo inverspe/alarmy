@@ -61,8 +61,8 @@ public struct Alarm: Codable, Identifiable, Equatable {
         ringAfterMinutes = try c.decodeIfPresent(Int.self, forKey: .ringAfterMinutes) ?? 10
         lockHours = try c.decodeIfPresent(Int.self, forKey: .lockHours) ?? 8
         earlyClearMinutes = try c.decodeIfPresent(Int.self, forKey: .earlyClearMinutes) ?? 30
-        gentleSeconds = 0
-        wakeCheckMinutes = 0
+        gentleSeconds = try c.decodeIfPresent(Int.self, forKey: .gentleSeconds) ?? 0
+        wakeCheckMinutes = try c.decodeIfPresent(Int.self, forKey: .wakeCheckMinutes) ?? 0
     }
 }
 

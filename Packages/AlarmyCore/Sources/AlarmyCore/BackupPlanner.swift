@@ -22,22 +22,35 @@ public struct PlannedNotification: Equatable {
     }
 }
 
-/// Critical-alert backups that keep going off if the app is killed.
+/// Backups that keep going off if the app is killed, including the wake-up check.
 /// iOS allows 64 pending local notifications; this stays within `budget`.
 public enum BackupPlanner {
     public static let interval: TimeInterval = 30
     public static let budget = 60
     public static let perOccurrenceMax = 40
+    /// With a wake-up check still to come, the budget is shared between the ring now and the repeat later.
+    static let ringMaxBeforeCheck = 25
+    static let repeatMax = 30
 
     public static func plan(upcoming: [Occurrence], completed: Set<OccurrenceKey>,
                             session: RingSession?, now: Date) -> [PlannedNotification] {
         var result: [PlannedNotification] = []
 
-        if let session, session.isRinging {
-            for k in 1...perOccurrenceMax {
-                let fireDate = now.addingTimeInterval(interval * Double(k))
-                if case .countdown(let endsAt) = session.phase, fireDate >= endsAt { break }
-                result.append(PlannedNotification(occurrence: session.occurrence, fireDate: fireDate))
+        if let session {
+            switch session.phase {
+            case .mission where session.isRinging:
+                result += ring(session, count: perOccurrenceMax, until: nil, now: now)
+            case .countdown(let endsAt) where session.isRinging:
+                let checkAt = session.wakeCheckMinutes > 0
+                    ? endsAt.addingTimeInterval(TimeInterval(session.wakeCheckMinutes) * 60) : nil
+                result += ring(session, count: checkAt == nil ? perOccurrenceMax : ringMaxBeforeCheck, until: endsAt, now: now)
+                if let checkAt { result += wakeCheck(session, at: checkAt) }
+            case .wakeCheckWaiting(let checkAt):
+                result += wakeCheck(session, at: checkAt)
+            case .wakeCheckPrompt(let deadline):
+                result += repeatRing(session, from: deadline)
+            default:
+                break
             }
         }
 
@@ -45,12 +58,41 @@ public enum BackupPlanner {
             .filter { !completed.contains($0.key) && $0.key != session?.occurrence }
             .sorted { $0.fireDate < $1.fireDate }
         for occurrence in pending {
+            let first = occurrence.fireDate.addingTimeInterval(TimeInterval(occurrence.alarm.gentleSeconds))
             for k in 0..<perOccurrenceMax where result.count < budget {
                 result.append(PlannedNotification(occurrence: occurrence.key,
-                                                  fireDate: occurrence.fireDate.addingTimeInterval(interval * Double(k))))
+                                                  fireDate: first.addingTimeInterval(interval * Double(k))))
             }
         }
 
         return result.sorted { $0.fireDate < $1.fireDate }
+    }
+
+    /// Backups for a ring in progress, sliding forward from `now`. They hold off until
+    /// a gentle wake-up has finished, so they don't cut across it at full volume.
+    private static func ring(_ session: RingSession, count: Int, until end: Date?, now: Date) -> [PlannedNotification] {
+        var base = now
+        if let gentleEnd = session.gentleEndsAt, gentleEnd > now { base = gentleEnd.addingTimeInterval(-interval) }
+        var result: [PlannedNotification] = []
+        for k in 1...count {
+            let fireDate = base.addingTimeInterval(interval * Double(k))
+            if let end, fireDate >= end { break }
+            result.append(PlannedNotification(occurrence: session.occurrence, fireDate: fireDate))
+        }
+        return result
+    }
+
+    private static func wakeCheck(_ session: RingSession, at checkAt: Date) -> [PlannedNotification] {
+        [PlannedNotification(occurrence: session.occurrence, fireDate: checkAt, kind: .wakeCheck)]
+            + repeatRing(session, from: checkAt.addingTimeInterval(RingSession.wakeCheckResponseTime))
+    }
+
+    /// The ring that follows a missed check, if the app isn't there to start it. Stops at the hard cap.
+    private static func repeatRing(_ session: RingSession, from deadline: Date) -> [PlannedNotification] {
+        let cap = session.occurrence.fireDate.addingTimeInterval(Schedule.hardCap)
+        return (0..<repeatMax)
+            .map { deadline.addingTimeInterval(interval * Double($0)) }
+            .filter { $0 < cap }
+            .map { PlannedNotification(occurrence: session.occurrence, fireDate: $0) }
     }
 }

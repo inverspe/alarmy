@@ -49,7 +49,16 @@ struct AlarmEditView: View {
                         }
                     }
 
+                    field("Gentle wake-up") {
+                        Picker("Gentle wake-up", selection: $alarm.gentleSeconds) {
+                            ForEach(GentleRamp.choices, id: \.self) { Text($0 == 0 ? "Off" : "\($0) s").tag($0) }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(Theme.dusk)
+                    }
+
                     stepperField("Keep ringing after mission", value: $alarm.ringAfterMinutes, range: 1...60, step: 1) { "\($0) min" }
+                    stepperField("Wake-up check after ring", value: $alarm.wakeCheckMinutes, range: 0...30, step: 1) { $0 == 0 ? "Off" : "\($0) min" }
                     stepperField("Lock edits before alarm", value: $alarm.lockHours, range: 0...12, step: 1) { $0 == 0 ? "Off" : "\($0) h" }
                     stepperField("Clear early window", value: $alarm.earlyClearMinutes, range: 0...60, step: 5) { $0 == 0 ? "Off" : "\($0) min" }
                 }

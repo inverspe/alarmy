@@ -46,6 +46,12 @@ enum Theme {
         return (String(format: "%02d:%02d", hour, minute), nil)
     }
 
+    /// "9:05" for a span of time, rounding up so it never shows 0:00 early.
+    static func countdown(_ seconds: TimeInterval) -> String {
+        let s = Int(seconds.rounded(.up))
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
     static func timeString(_ date: Date) -> String {
         let c = Calendar.current.dateComponents([.hour, .minute], from: date)
         let parts = timeParts(hour: c.hour ?? 0, minute: c.minute ?? 0)
