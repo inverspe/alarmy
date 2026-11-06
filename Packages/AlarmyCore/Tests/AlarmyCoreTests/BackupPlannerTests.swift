@@ -90,7 +90,7 @@ final class BackupPlannerTests: XCTestCase {
                                   objectIDs: [UUID()], gentleSeconds: 60, now: fire, using: &g)
         let p = BackupPlanner.plan(upcoming: [], completed: [], session: s, now: fire)
         XCTAssertEqual(p.first?.fireDate, fire + 60)
-        XCTAssertEqual(p[1].fireDate, fire + 90)
+        XCTAssertEqual(p.dropFirst().first?.fireDate, fire + 90)
     }
 
     func testRingingBackupsSlideAgainOnceTheRampIsOver() {
@@ -129,8 +129,8 @@ final class BackupPlannerTests: XCTestCase {
         let p = BackupPlanner.plan(upcoming: [], completed: [], session: s, now: t + 600)
         XCTAssertEqual(p.first?.kind, .wakeCheck)
         XCTAssertEqual(p.first?.fireDate, t + 900)
-        XCTAssertEqual(p[1].kind, .alarm)
-        XCTAssertEqual(p[1].fireDate, t + 1000)
+        XCTAssertEqual(p.dropFirst().first?.kind, .alarm)
+        XCTAssertEqual(p.dropFirst().first?.fireDate, t + 1000)
     }
 
     func testPromptPlansOnlyTheRepeat() {
