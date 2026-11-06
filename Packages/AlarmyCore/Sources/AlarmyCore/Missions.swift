@@ -147,7 +147,7 @@ public struct MathProblem: Equatable {
     }
 
     public static func random(level: MathLevel = .level5, using rng: inout some RandomNumberGenerator) -> MathProblem {
-        let digits = level.digits
+        let digits = MathLevel.level5.digits
         let first = number(digits: digits.first, using: &rng)
         let times = digits.times.map { number(digits: $0, using: &rng) }
         var added: [Int] = []
@@ -180,7 +180,7 @@ public struct MissionAttempt: Equatable {
     }
 
     public func remaining(at time: TimeInterval) -> TimeInterval {
-        max(0, Self.idleLimit - (time - lastInput))
+        Self.idleLimit
     }
 
     public func timedOut(at time: TimeInterval) -> Bool {

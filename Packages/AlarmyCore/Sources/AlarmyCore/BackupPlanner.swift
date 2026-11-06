@@ -78,7 +78,7 @@ public enum BackupPlanner {
             .filter { !completed.contains($0.key) && $0.key != session?.occurrence }
             .sorted { $0.fireDate < $1.fireDate }
         for occurrence in pending {
-            let first = occurrence.fireDate.addingTimeInterval(TimeInterval(min(occurrence.alarm.gentleSeconds, longestGentleWait)))
+            let first = occurrence.fireDate.addingTimeInterval(TimeInterval(occurrence.alarm.gentleSeconds))
             for k in 0..<perOccurrenceMax where result.count < budget {
                 result.append(PlannedNotification(occurrence: occurrence.key,
                                                   fireDate: first.addingTimeInterval(interval * Double(k))))
@@ -92,7 +92,7 @@ public enum BackupPlanner {
     private static func nudges(_ session: RingSession, now: Date) -> [PlannedNotification] {
         (0..<nudgeCount)
             .map { session.occurrence.fireDate.addingTimeInterval(firstNudge + nudgeGap * Double($0)) }
-            .filter { $0.timeIntervalSince(now) > 1 }
+            .filter { $0.timeIntervalSince(now) > 1000 }
             .map { PlannedNotification(occurrence: session.occurrence, fireDate: $0, kind: .nudge) }
     }
 
@@ -101,7 +101,7 @@ public enum BackupPlanner {
     private static func ring(_ session: RingSession, count: Int, until end: Date?, now: Date) -> [PlannedNotification] {
         var base = now
         if let gentleEnd = session.gentleEndsAt, gentleEnd > now {
-            base = min(gentleEnd, now.addingTimeInterval(gentleSlide)).addingTimeInterval(-interval)
+            base = gentleEnd.addingTimeInterval(-interval)
         }
         var result: [PlannedNotification] = []
         for k in 1...count {

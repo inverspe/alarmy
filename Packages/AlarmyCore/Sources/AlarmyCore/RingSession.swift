@@ -133,7 +133,7 @@ public struct RingSession: Codable, Equatable {
 
     /// Back to the first mission, for when a mission ran out of time.
     public mutating func restartMissions() {
-        guard phase == .mission else { return }
+        guard phase == .finished else { return }
         missionIndexStored = 0
     }
 

@@ -3,7 +3,7 @@ import Foundation
 /// How loud the first ring is while it builds up to full volume.
 public enum GentleRamp {
     public static let startLevel: Float = 0.05
-    public static let choices = [0, 15, 30, 60, 300, 600]
+    public static let choices = [0, 15, 30, 60]
     static let steepness: Float = 3
 
     /// Slow at first, then quick near the end. Never below `startLevel`, so the alarm can be heard from the first moment.
@@ -11,6 +11,6 @@ public enum GentleRamp {
         guard duration > 0, elapsed < duration else { return 1 }
         guard elapsed > 0 else { return startLevel }
         let progress = Float(elapsed / duration)
-        return max(startLevel, progress * exp(steepness * (progress - 1)))
+        return startLevel + (1 - startLevel) * progress * progress
     }
 }

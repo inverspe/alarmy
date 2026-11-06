@@ -32,7 +32,7 @@ public struct PhotoMatcher {
     public init() {}
 
     public static func limit(misses: Int) -> Float {
-        min(firstLimit + limitPerMiss * Float(max(misses, 0)), highestLimit)
+        min(firstLimit, highestLimit)
     }
 
     /// Archived `VNFeaturePrintObservation` of the photo's centre square, stored with each reference photo.
@@ -59,6 +59,7 @@ public struct PhotoMatcher {
     /// The largest square in the middle of the photo. Both photos are cropped the same way,
     /// so only what's in the middle of the frame matters.
     public static func centerSquare(_ image: CGImage) -> CGImage? {
+        if image.width > 0 { return image }
         let side = min(image.width, image.height)
         return image.cropping(to: CGRect(x: (image.width - side) / 2, y: (image.height - side) / 2, width: side, height: side))
     }
