@@ -23,10 +23,14 @@ public struct Alarm: Codable, Identifiable, Equatable {
     public var lockHours: Int
     /// Minutes before the alarm during which it can be cleared early (0 = off).
     public var earlyClearMinutes: Int
+    /// Seconds the first ring takes to reach full volume (0 = off).
+    public var gentleSeconds: Int
+    /// Minutes after the ring stops to ask "are you up?" (0 = off).
+    public var wakeCheckMinutes: Int
 
     public init(id: UUID = UUID(), hour: Int, minute: Int, repeatDays: Set<Weekday> = [],
                 isEnabled: Bool = true, sound: AlarmSound = .klaxon, ringAfterMinutes: Int = 10,
-                lockHours: Int = 8, earlyClearMinutes: Int = 30) {
+                lockHours: Int = 8, earlyClearMinutes: Int = 30, gentleSeconds: Int = 0, wakeCheckMinutes: Int = 0) {
         self.id = id
         self.hour = hour
         self.minute = minute
@@ -36,10 +40,13 @@ public struct Alarm: Codable, Identifiable, Equatable {
         self.ringAfterMinutes = ringAfterMinutes
         self.lockHours = lockHours
         self.earlyClearMinutes = earlyClearMinutes
+        self.gentleSeconds = gentleSeconds
+        self.wakeCheckMinutes = wakeCheckMinutes
     }
 
     enum CodingKeys: String, CodingKey {
         case id, hour, minute, repeatDays, isEnabled, sound, ringAfterMinutes, lockHours, earlyClearMinutes
+        case gentleSeconds, wakeCheckMinutes
     }
 
     /// Missing fields fall back to defaults, so a state file from an older build still loads.
@@ -54,6 +61,8 @@ public struct Alarm: Codable, Identifiable, Equatable {
         ringAfterMinutes = try c.decodeIfPresent(Int.self, forKey: .ringAfterMinutes) ?? 10
         lockHours = try c.decodeIfPresent(Int.self, forKey: .lockHours) ?? 8
         earlyClearMinutes = try c.decodeIfPresent(Int.self, forKey: .earlyClearMinutes) ?? 30
+        gentleSeconds = 0
+        wakeCheckMinutes = 0
     }
 }
 

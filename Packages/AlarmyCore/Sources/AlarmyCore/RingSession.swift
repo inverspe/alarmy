@@ -1,14 +1,20 @@
 import Foundation
 
-/// One morning's alarm: photo mission, then a countdown that keeps ringing, then done.
+/// One morning's alarm: photo mission, then a countdown that keeps ringing, then
+/// (if turned on) a wake-up check, then done.
 public struct RingSession: Codable, Equatable {
     public enum Phase: Codable, Equatable {
         case mission
         case countdown(endsAt: Date)
+        /// The ring has stopped; the wake-up check comes at `checkAt`.
+        case wakeCheckWaiting(checkAt: Date)
+        /// Asking "are you up?". No answer by `deadline` and the alarm starts over.
+        case wakeCheckPrompt(deadline: Date)
         case finished
     }
 
     public static let missesBeforeSwitch = 5
+    public static let wakeCheckResponseTime: TimeInterval = 100
 
     public let occurrence: OccurrenceKey
     public let ringAfterMinutes: Int
@@ -18,13 +24,24 @@ public struct RingSession: Codable, Equatable {
     public private(set) var currentObjectID: UUID?
     public private(set) var missesOnCurrent: Int
     public private(set) var triedObjectIDs: [UUID]
+    // Optional so a session saved by an older build still loads.
+    private let wakeCheckMinutesStored: Int?
+    private var gentleSecondsStored: Int?
+    private var missedWakeChecksStored: Int?
 
     public var isRinging: Bool { !isEarlyClear && phase != .finished }
+    public var isAwaitingWakeCheck: Bool { false }
+    public var missedWakeChecks: Int { 0 }
+    public var wakeCheckMinutes: Int { 0 }
+    /// When the first ring reaches full volume. Nil once it is at full volume for good.
+    public var gentleEndsAt: Date? { nil }
+
+    public func ringLevel(now: Date) -> Float { 1 }
 
     /// With no usable objects there is no mission: it rings for the countdown and then
     /// stops, so it can never ring forever.
     public static func start(occurrence: OccurrenceKey, ringAfterMinutes: Int, isEarlyClear: Bool,
-                             objectIDs: [UUID], now: Date,
+                             objectIDs: [UUID], wakeCheckMinutes: Int = 0, gentleSeconds: Int = 0, now: Date,
                              using rng: inout some RandomNumberGenerator) -> RingSession {
         let pick = objectIDs.randomElement(using: &rng)
         let phase: Phase
@@ -37,7 +54,9 @@ public struct RingSession: Codable, Equatable {
         }
         return RingSession(occurrence: occurrence, ringAfterMinutes: ringAfterMinutes, isEarlyClear: isEarlyClear,
                            phase: phase, currentObjectID: pick, missesOnCurrent: 0,
-                           triedObjectIDs: pick.map { [$0] } ?? [])
+                           triedObjectIDs: pick.map { [$0] } ?? [],
+                           wakeCheckMinutesStored: wakeCheckMinutes, gentleSecondsStored: gentleSeconds,
+                           missedWakeChecksStored: 0)
     }
 
     /// After `missesBeforeSwitch` misses, switches to another available object,
@@ -66,9 +85,18 @@ public struct RingSession: Codable, Equatable {
             : .countdown(endsAt: now.addingTimeInterval(TimeInterval(ringAfterMinutes) * 60))
     }
 
+    /// The owner answered the wake-up check.
+    public mutating func confirmAwake() {
+    }
+
+    public mutating func tick(now: Date) {
+        var unused = SystemRandomNumberGenerator()
+        tick(now: now, availableObjectIDs: [], using: &unused)
+    }
+
     /// Ends the countdown when it runs out. An unfinished mission gives up at the
     /// hard cap, so a mission that can't be completed never rings forever.
-    public mutating func tick(now: Date) {
+    public mutating func tick(now: Date, availableObjectIDs: [UUID], using rng: inout some RandomNumberGenerator) {
         switch phase {
         case .countdown(let endsAt) where now >= endsAt:
             phase = .finished

@@ -1,14 +1,24 @@
 import Foundation
 
 public struct PlannedNotification: Equatable {
+    public enum Kind: String, Equatable {
+        /// Keeps the alarm going if the app is closed.
+        case alarm
+        /// The quiet "are you up?" prompt.
+        case wakeCheck
+    }
+
     public let id: String
     public let fireDate: Date
     public let occurrence: OccurrenceKey
+    public let kind: Kind
 
-    public init(occurrence: OccurrenceKey, fireDate: Date) {
-        self.id = "\(occurrence.alarmID)-\(Int(fireDate.timeIntervalSince1970))"
+    public init(occurrence: OccurrenceKey, fireDate: Date, kind: Kind = .alarm) {
+        let base = "\(occurrence.alarmID)-\(Int(fireDate.timeIntervalSince1970))"
+        self.id = kind == .alarm ? base : "\(base)-\(kind.rawValue)"
         self.fireDate = fireDate
         self.occurrence = occurrence
+        self.kind = kind
     }
 }
 
