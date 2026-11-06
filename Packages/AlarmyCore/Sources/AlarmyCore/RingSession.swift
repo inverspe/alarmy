@@ -15,6 +15,8 @@ public struct RingSession: Codable, Equatable {
 
     public static let missesBeforeSwitch = 5
     public static let wakeCheckResponseTime: TimeInterval = 100
+    /// Minutes after the ring stops to ask "are you up?" (0 = off).
+    public static let wakeCheckChoices = [0, 1, 3, 5, 7, 10]
 
     public let occurrence: OccurrenceKey
     public let ringAfterMinutes: Int
@@ -127,6 +129,12 @@ public struct RingSession: Codable, Equatable {
         phase = isEarlyClear
             ? .finished
             : .countdown(endsAt: now.addingTimeInterval(TimeInterval(ringAfterMinutes) * 60))
+    }
+
+    /// Back to the first mission, for when a mission ran out of time.
+    public mutating func restartMissions() {
+        guard phase == .mission else { return }
+        missionIndexStored = 0
     }
 
     /// The owner answered the wake-up check.

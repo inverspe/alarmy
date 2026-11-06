@@ -29,11 +29,16 @@ public struct Alarm: Codable, Identifiable, Equatable {
     public var wakeCheckMinutes: Int
     /// Done in this order when the alarm rings.
     public var missions: [MissionStep]
+    /// Vibrates once a second while ringing.
+    public var vibrate: Bool
+    /// The sound stops while a mission is open, and comes back if the mission goes idle.
+    public var quietDuringMissions: Bool
     public var needsObjects: Bool { missions.contains { $0.kind == .photo } }
 
     public init(id: UUID = UUID(), hour: Int, minute: Int, repeatDays: Set<Weekday> = [],
                 isEnabled: Bool = true, sound: AlarmSound = .klaxon, ringAfterMinutes: Int = 10,
-                lockHours: Int = 8, earlyClearMinutes: Int = 30, gentleSeconds: Int = 0, wakeCheckMinutes: Int = 0, missions: [MissionStep] = [.photo]) {
+                lockHours: Int = 8, earlyClearMinutes: Int = 30, gentleSeconds: Int = 0, wakeCheckMinutes: Int = 0, missions: [MissionStep] = [.photo],
+                vibrate: Bool = true, quietDuringMissions: Bool = true) {
         self.id = id
         self.hour = hour
         self.minute = minute
@@ -46,11 +51,13 @@ public struct Alarm: Codable, Identifiable, Equatable {
         self.gentleSeconds = gentleSeconds
         self.wakeCheckMinutes = wakeCheckMinutes
         self.missions = missions
+        self.vibrate = vibrate
+        self.quietDuringMissions = quietDuringMissions
     }
 
     enum CodingKeys: String, CodingKey {
         case id, hour, minute, repeatDays, isEnabled, sound, ringAfterMinutes, lockHours, earlyClearMinutes
-        case gentleSeconds, wakeCheckMinutes, missions
+        case gentleSeconds, wakeCheckMinutes, missions, vibrate, quietDuringMissions
     }
 
     /// Missing fields fall back to defaults, so a state file from an older build still loads.
@@ -68,6 +75,8 @@ public struct Alarm: Codable, Identifiable, Equatable {
         gentleSeconds = try c.decodeIfPresent(Int.self, forKey: .gentleSeconds) ?? 0
         wakeCheckMinutes = try c.decodeIfPresent(Int.self, forKey: .wakeCheckMinutes) ?? 0
         missions = ((try? c.decodeIfPresent([MissionStep].self, forKey: .missions)) ?? [.photo]).cleaned
+        vibrate = try c.decodeIfPresent(Bool.self, forKey: .vibrate) ?? true
+        quietDuringMissions = try c.decodeIfPresent(Bool.self, forKey: .quietDuringMissions) ?? true
     }
 }
 
@@ -81,10 +90,6 @@ public struct RegisteredObject: Codable, Identifiable, Equatable {
         self.name = name
         self.referencePhotoIDs = referencePhotoIDs
     }
-}
-
-public enum Strictness: String, Codable, CaseIterable {
-    case loose, medium, strict
 }
 
 /// One specific firing of an alarm.
@@ -113,7 +118,8 @@ public struct Occurrence: Equatable {
 public struct AppState: Codable, Equatable {
     public var alarms: [Alarm] = []
     public var objects: [RegisteredObject] = []
-    public var strictness: Strictness = .medium
+    /// Photos that didn't match since the last one that did. Each one makes the next match easier.
+    public var photoMisses = 0
     /// Occurrences that are done, with when they finished.
     public var completed: [OccurrenceKey: Date] = [:]
     public var ringSession: RingSession? = nil
@@ -123,7 +129,7 @@ public struct AppState: Codable, Equatable {
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case alarms, objects, strictness, completed, ringSession, onboardingDone, clockAnchor
+        case alarms, objects, photoMisses, completed, ringSession, onboardingDone, clockAnchor
     }
 
     /// Missing fields fall back to defaults, and an unreadable session or clock anchor is
@@ -132,7 +138,7 @@ public struct AppState: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         alarms = try c.decodeIfPresent([Alarm].self, forKey: .alarms) ?? []
         objects = try c.decodeIfPresent([RegisteredObject].self, forKey: .objects) ?? []
-        strictness = (try? c.decodeIfPresent(Strictness.self, forKey: .strictness)) ?? .medium
+        photoMisses = (try? c.decodeIfPresent(Int.self, forKey: .photoMisses)) ?? 0
         completed = (try? c.decodeIfPresent([OccurrenceKey: Date].self, forKey: .completed)) ?? [:]
         ringSession = try? c.decodeIfPresent(RingSession.self, forKey: .ringSession)
         onboardingDone = try c.decodeIfPresent(Bool.self, forKey: .onboardingDone) ?? false

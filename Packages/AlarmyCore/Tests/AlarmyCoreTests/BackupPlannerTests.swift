@@ -88,9 +88,65 @@ final class BackupPlannerTests: XCTestCase {
         let fire = date("2026-10-21 06:30")
         let s = RingSession.start(occurrence: occ(a, "2026-10-21 06:30").key, ringAfterMinutes: 10, isEarlyClear: false,
                                   objectIDs: [UUID()], gentleSeconds: 60, now: fire, using: &g)
-        let p = BackupPlanner.plan(upcoming: [], completed: [], session: s, now: fire)
+        let p = BackupPlanner.plan(upcoming: [], completed: [], session: s, now: fire).filter { $0.kind == .alarm }
         XCTAssertEqual(p.first?.fireDate, fire + 60)
         XCTAssertEqual(p.dropFirst().first?.fireDate, fire + 90)
+    }
+
+    func testClosedAppNeverWaitsMoreThanAMinuteForALongRamp() {
+        var gentle = alarm(6, 30)
+        gentle.gentleSeconds = 600
+        let p = plan(upcoming: [occ(gentle, "2026-10-21 06:30")], now: "2026-10-20 22:00")
+        XCTAssertEqual(p.first?.fireDate, date("2026-10-21 06:30") + 60)
+    }
+
+    func testRunningAppKeepsBackupsClearOfALongRamp() {
+        let fire = date("2026-10-21 06:30")
+        let s = RingSession.start(occurrence: occ(a, "2026-10-21 06:30").key, ringAfterMinutes: 10, isEarlyClear: false,
+                                  objectIDs: [UUID()], gentleSeconds: 600, now: fire, using: &g)
+        let backups = { (now: Date) in
+            BackupPlanner.plan(upcoming: [], completed: [], session: s, now: now).filter { $0.kind == .alarm }
+        }
+        XCTAssertEqual(backups(fire).first?.fireDate, fire + 90)
+        XCTAssertEqual(backups(fire + 300).first?.fireDate, fire + 390)
+        XCTAssertEqual(backups(fire + 580).first?.fireDate, fire + 600)
+    }
+
+    // MARK: Silent banners while ringing
+
+    func testRingStartsWithSilentBanners() {
+        let o = occ(a, "2026-10-21 06:30")
+        let p = BackupPlanner.plan(upcoming: [], completed: [], session: mission(o), now: o.fireDate)
+        let nudges = p.filter { $0.kind == .nudge }.map(\.fireDate)
+        XCTAssertEqual(nudges, (0..<10).map { o.fireDate + 1.5 + 6 * Double($0) })
+    }
+
+    func testBannersAlreadyPastAreLeftOut() {
+        let o = occ(a, "2026-10-21 06:30")
+        let p = BackupPlanner.plan(upcoming: [], completed: [], session: mission(o), now: o.fireDate + 30)
+        XCTAssertTrue(p.filter { $0.kind == .nudge }.allSatisfy { $0.fireDate > o.fireDate + 31 })
+        XCTAssertEqual(p.filter { $0.kind == .nudge }.count, 5)
+    }
+
+    func testNoBannersOnceTheFirstMinuteIsOver() {
+        let o = occ(a, "2026-10-21 06:30")
+        let p = BackupPlanner.plan(upcoming: [], completed: [], session: mission(o), now: o.fireDate + 60)
+        XCTAssertFalse(p.contains { $0.kind == .nudge })
+    }
+
+    func testBannerIdsAreDifferentFromAlarms() {
+        let k = occ(a, "2026-10-21 06:30").key
+        let fire = date("2026-10-21 06:31")
+        XCTAssertNotEqual(PlannedNotification(occurrence: k, fireDate: fire, kind: .nudge).id,
+                          PlannedNotification(occurrence: k, fireDate: fire).id)
+    }
+
+    func testRingStartStaysWithinTheLimitIOSSets() {
+        let o = occ(a, "2026-10-21 06:30")
+        let upcoming = (0..<5).map { occ(alarm(7, $0 * 10), "2026-10-21 07:\(String(format: "%02d", $0 * 10))") }
+        let p = BackupPlanner.plan(upcoming: upcoming, completed: [], session: mission(o), now: o.fireDate)
+        XCTAssertLessThanOrEqual(p.count, 64)
+        XCTAssertEqual(Set(p.map(\.id)).count, p.count)
     }
 
     func testRingingBackupsSlideAgainOnceTheRampIsOver() {

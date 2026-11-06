@@ -31,6 +31,23 @@ public enum MissionKind: String, Codable, CaseIterable {
         case .shake: return 10
         }
     }
+
+    /// How many math difficulties or shake strengths there are. Zero for other missions.
+    public var levelCount: Int {
+        switch self {
+        case .math: return MathLevel.allCases.count
+        case .shake: return ShakeCounter.levels.count
+        case .photo, .steps, .squats: return 0
+        }
+    }
+
+    public var defaultLevel: Int {
+        switch self {
+        case .math: return MathLevel.level5.rawValue
+        case .shake: return ShakeCounter.defaultLevel
+        case .photo, .steps, .squats: return 0
+        }
+    }
 }
 
 /// One mission in an alarm's list. Each kind appears at most once per alarm.
@@ -38,111 +55,135 @@ public struct MissionStep: Codable, Equatable, Identifiable {
     public let kind: MissionKind
     /// Steps, squats, shakes or sums to do. Always 1 for photo.
     public var amount: Int
+    /// Math difficulty or shake strength. Zero for other missions.
+    public var level: Int
     public var id: MissionKind { kind }
 
-    public init(kind: MissionKind, amount: Int? = nil) {
+    public init(kind: MissionKind, amount: Int? = nil, level: Int? = nil) {
         self.kind = kind
         self.amount = amount ?? kind.defaultAmount
+        self.level = level ?? kind.defaultLevel
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind, amount, level
+    }
+
+    /// A list saved by an older build has no levels.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(MissionKind.self, forKey: .kind)
+        amount = try c.decode(Int.self, forKey: .amount)
+        level = try c.decodeIfPresent(Int.self, forKey: .level) ?? kind.defaultLevel
     }
 
     public static let photo = MissionStep(kind: .photo)
 }
 
 public extension Array where Element == MissionStep {
-    /// A list that's safe to run: never empty, no kind twice, amounts in range.
+    /// A list that's safe to run: never empty, no kind twice, amounts and levels in range.
     var cleaned: [MissionStep] {
         var seen = Set<MissionKind>()
         let list = filter { seen.insert($0.kind).inserted }.map { step -> MissionStep in
             let range = step.kind.amountRange
-            return MissionStep(kind: step.kind, amount: Swift.min(Swift.max(step.amount, range.lowerBound), range.upperBound))
+            let topLevel = Swift.max(step.kind.levelCount - 1, 0)
+            return MissionStep(kind: step.kind,
+                               amount: Swift.min(Swift.max(step.amount, range.lowerBound), range.upperBound),
+                               level: Swift.min(Swift.max(step.level, 0), topLevel))
         }
         return list.isEmpty ? [.photo] : list
     }
 }
 
-/// A sum like 14 × 6 + 37: enough to need thinking, still doable half asleep.
+/// How hard the sums are, easiest first.
+public enum MathLevel: Int, CaseIterable {
+    case level1, level2, level3, level4, level5, level6, level7
+
+    /// Digits in each number of the sum.
+    fileprivate var digits: (first: Int, times: Int?, added: [Int]) {
+        switch self {
+        case .level1: return (1, nil, [1])
+        case .level2: return (2, nil, [1])
+        case .level3: return (2, nil, [2])
+        case .level4: return (2, nil, [2, 2])
+        case .level5: return (2, 1, [2])
+        case .level6: return (2, 2, [3])
+        case .level7: return (3, 2, [4])
+        }
+    }
+
+    /// What a sum at this level looks like.
+    public var example: String {
+        switch self {
+        case .level1: return "4 + 7"
+        case .level2: return "24 + 7"
+        case .level3: return "24 + 35"
+        case .level4: return "24 + 35 + 61"
+        case .level5: return "24 × 7 + 35"
+        case .level6: return "24 × 35 + 120"
+        case .level7: return "240 × 35 + 1200"
+        }
+    }
+}
+
+/// A sum like 14 × 6 + 37. Multiplication goes first.
 public struct MathProblem: Equatable {
-    public let a: Int
-    public let b: Int
-    public let c: Int
+    public let first: Int
+    public let times: Int?
+    public let added: [Int]
 
-    public var answer: Int { a * b + c }
-    public var text: String { "\(a) × \(b) + \(c)" }
+    public init(first: Int, times: Int? = nil, added: [Int]) {
+        self.first = first
+        self.times = times
+        self.added = added
+    }
 
-    public static func random(using rng: inout some RandomNumberGenerator) -> MathProblem {
-        MathProblem(a: Int.random(in: 11...29, using: &rng),
-                    b: Int.random(in: 2...9, using: &rng),
-                    c: Int.random(in: 10...99, using: &rng))
+    public var answer: Int { first * (times ?? 1) + added.reduce(0, +) }
+
+    public var text: String {
+        var result = times.map { "\(first) × \($0)" } ?? "\(first)"
+        for number in added { result += " + \(number)" }
+        return result
+    }
+
+    public static func random(level: MathLevel = .level5, using rng: inout some RandomNumberGenerator) -> MathProblem {
+        let digits = level.digits
+        let first = number(digits: digits.first, using: &rng)
+        let times = digits.times.map { number(digits: $0, using: &rng) }
+        var added: [Int] = []
+        for count in digits.added { added.append(number(digits: count, using: &rng)) }
+        return MathProblem(first: first, times: times, added: added)
+    }
+
+    /// One digit is 1–9, two digits 10–99, and so on.
+    private static func number(digits: Int, using rng: inout some RandomNumberGenerator) -> Int {
+        var low = 1
+        for _ in 1..<max(digits, 1) { low *= 10 }
+        return Int.random(in: low...(low * 10 - 1), using: &rng)
     }
 }
 
-/// Counts shakes from how hard the phone is being moved, in g. One shake is a hard
-/// movement that dies down again, so holding it there or vibrating it doesn't add up.
-public struct ShakeCounter {
-    static let hardEnough = 1.8
-    static let calmedDown = 0.8
-    static let shortestGap: TimeInterval = 0.15
+/// How long a mission waits for input before it closes and the sound comes back.
+public struct MissionAttempt: Equatable {
+    public static let idleLimit: TimeInterval = 20
+    /// A sensor that hasn't counted anything in this much mission time is treated as broken.
+    public static let stuckAfter: TimeInterval = 120
 
-    public private(set) var count = 0
-    private var armed = true
-    private var lastCount: TimeInterval = -.infinity
+    private var lastInput: TimeInterval
 
-    public init() {}
-
-    public mutating func add(acceleration: Double, at time: TimeInterval) {
-        if armed {
-            if acceleration >= Self.hardEnough && time - lastCount >= Self.shortestGap {
-                count += 1
-                lastCount = time
-                armed = false
-            }
-        } else if acceleration < Self.calmedDown {
-            armed = true
-        }
-    }
-}
-
-/// Counts squats from the phone's up-and-down acceleration, in g, positive going up.
-///
-/// Going down speeds the phone up downward, then the bottom of the squat pushes it upward,
-/// then stopping at the top slows it down again: negative, positive, negative. That last
-/// slowdown can also be the start of the next squat, for someone going straight into it.
-public struct SquatCounter {
-    static let threshold = 0.08
-    static let smoothing = 0.2
-    static let shortestRep: TimeInterval = 0.7
-    static let longestRep: TimeInterval = 8
-
-    private enum Stage {
-        case waiting
-        case goingDown(since: TimeInterval)
-        case comingUp(since: TimeInterval)
+    public init(now: TimeInterval) {
+        lastInput = now
     }
 
-    public private(set) var count = 0
-    private var stage = Stage.waiting
-    private var smoothed = 0.0
+    public mutating func input(at time: TimeInterval) {
+        lastInput = max(lastInput, time)
+    }
 
-    public init() {}
+    public func remaining(at time: TimeInterval) -> TimeInterval {
+        max(0, Self.idleLimit - (time - lastInput))
+    }
 
-    public mutating func add(verticalAcceleration: Double, at time: TimeInterval) {
-        smoothed += Self.smoothing * (verticalAcceleration - smoothed)
-        switch stage {
-        case .waiting:
-            if smoothed <= -Self.threshold { stage = .goingDown(since: time) }
-        case .goingDown(let since):
-            if time - since > Self.longestRep {
-                stage = smoothed <= -Self.threshold ? .goingDown(since: time) : .waiting
-            } else if smoothed >= Self.threshold {
-                stage = .comingUp(since: since)
-            }
-        case .comingUp(let since):
-            if time - since > Self.longestRep {
-                stage = .waiting
-            } else if smoothed <= -Self.threshold {
-                if time - since >= Self.shortestRep { count += 1 }
-                stage = .goingDown(since: time)
-            }
-        }
+    public func timedOut(at time: TimeInterval) -> Bool {
+        remaining(at: time) <= 0
     }
 }

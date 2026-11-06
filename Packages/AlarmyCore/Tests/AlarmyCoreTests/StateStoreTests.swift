@@ -24,7 +24,7 @@ final class StateStoreTests: XCTestCase {
         XCTAssertEqual(a.sound, .klaxon)
         XCTAssertTrue(a.repeatDays.isEmpty)
         XCTAssertTrue(a.isEnabled)
-        XCTAssertEqual(AppState().strictness, .medium)
+        XCTAssertEqual(AppState().photoMisses, 0)
         XCTAssertFalse(AppState().onboardingDone)
     }
 
@@ -39,10 +39,17 @@ final class StateStoreTests: XCTestCase {
         var s = AppState()
         s.alarms = [alarm(6, 30)]
         s.objects = [RegisteredObject(id: UUID(), name: "Kettle", referencePhotoIDs: [UUID(), UUID()])]
-        s.strictness = .strict
+        s.photoMisses = 3
         s.completed = [OccurrenceKey(alarmID: s.alarms[0].id, fireDate: date("2026-10-21 06:30")): date("2026-10-21 06:42")]
         try store.save(s)
         XCTAssertEqual(store.load(), s)
+    }
+
+    func testFileFromAnOlderBuildStillLoads() throws {
+        try Data(#"{"strictness":"strict","onboardingDone":true}"#.utf8).write(to: tmp)
+        let loaded = StateStore(fileURL: tmp).load()
+        XCTAssertTrue(loaded.onboardingDone)
+        XCTAssertEqual(loaded.photoMisses, 0)
     }
 
     func testMissingFileLoadsDefaults() {

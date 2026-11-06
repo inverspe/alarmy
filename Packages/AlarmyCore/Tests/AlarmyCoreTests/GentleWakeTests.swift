@@ -22,7 +22,23 @@ final class GentleWakeTests: XCTestCase {
 
     func testRisesEveryStep() {
         let levels = stride(from: 0.0, through: 30, by: 3).map { GentleRamp.level(elapsed: $0, duration: 30) }
-        for (earlier, later) in zip(levels, levels.dropFirst()) { XCTAssertLessThan(earlier, later) }
+        for (earlier, later) in zip(levels, levels.dropFirst()) { XCTAssertLessThanOrEqual(earlier, later) }
+        XCTAssertLessThan(levels[levels.count - 2], levels[levels.count - 1])
+    }
+
+    func testStaysLowThenRisesQuicklyNearTheEnd() {
+        XCTAssertEqual(GentleRamp.level(elapsed: 15, duration: 30), 0.1116, accuracy: 0.001)
+        XCTAssertEqual(GentleRamp.level(elapsed: 22.5, duration: 30), 0.3543, accuracy: 0.001)
+        XCTAssertEqual(GentleRamp.level(elapsed: 27, duration: 30), 0.6667, accuracy: 0.001)
+    }
+
+    func testVeryEarlyStaysAtTheStartLevel() {
+        XCTAssertEqual(GentleRamp.level(elapsed: 3, duration: 30), GentleRamp.startLevel)
+        XCTAssertEqual(GentleRamp.level(elapsed: 60, duration: 600), GentleRamp.startLevel)
+    }
+
+    func testOffersUpToTenMinutes() {
+        XCTAssertEqual(GentleRamp.choices, [0, 15, 30, 60, 300, 600])
     }
 
     func testFullAtTheEnd() {
@@ -61,6 +77,26 @@ final class GentleWakeTests: XCTestCase {
         let s = session(gentle: 0)
         XCTAssertEqual(s.ringLevel(now: fire), 1)
         XCTAssertNil(s.gentleEndsAt)
+    }
+
+    func testNewAlarmVibratesAndGoesQuietDuringMissions() {
+        let a = Alarm(hour: 7, minute: 0)
+        XCTAssertTrue(a.vibrate)
+        XCTAssertTrue(a.quietDuringMissions)
+    }
+
+    func testAlarmFromAnOlderBuildVibratesAndGoesQuietDuringMissions() throws {
+        let json = #"{"id":"\#(UUID().uuidString)","hour":7,"minute":0}"#
+        let decoded = try JSONDecoder().decode(Alarm.self, from: Data(json.utf8))
+        XCTAssertTrue(decoded.vibrate)
+        XCTAssertTrue(decoded.quietDuringMissions)
+    }
+
+    func testVibrateAndQuietThroughSaving() throws {
+        let original = Alarm(hour: 7, minute: 0, vibrate: false, quietDuringMissions: false)
+        let decoded = try JSONDecoder().decode(Alarm.self, from: JSONEncoder().encode(original))
+        XCTAssertFalse(decoded.vibrate)
+        XCTAssertFalse(decoded.quietDuringMissions)
     }
 
     func testAlarmFromAnOlderBuildHasBothFeaturesOff() throws {

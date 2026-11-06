@@ -6,6 +6,8 @@ public struct PlannedNotification: Equatable {
         case alarm
         /// The quiet "are you up?" prompt.
         case wakeCheck
+        /// A silent banner in the first minute of a ring, which lights up the lock screen.
+        case nudge
     }
 
     public let id: String
@@ -35,6 +37,14 @@ public enum BackupPlanner {
     public static let appClosedNoticeDelay: TimeInterval = 2.5
     /// Closing waits this long, because handing a notification to iOS takes a moment and the process is about to end.
     public static let appClosedHold: TimeInterval = 2
+    /// With the app closed, the first sound never waits longer than this for a gentle wake-up.
+    public static let longestGentleWait = 60
+    /// While a long gentle wake-up runs, the running app keeps the next backup at least this far off.
+    /// More than the 60 seconds between replans, so it stays clear of the ramp unless the app is gone.
+    static let gentleSlide: TimeInterval = 90
+    static let nudgeCount = 10
+    static let firstNudge: TimeInterval = 1.5
+    static let nudgeGap: TimeInterval = 6
 
     /// Plans use trusted time, but calendar triggers fire by the clock on screen. This is
     /// what the screen will show at `fireDate` when the phone's clock has been changed by hand.
@@ -49,7 +59,7 @@ public enum BackupPlanner {
         if let session {
             switch session.phase {
             case .mission where session.isRinging:
-                result += ring(session, count: perOccurrenceMax, until: nil, now: now)
+                result += nudges(session, now: now) + ring(session, count: perOccurrenceMax, until: nil, now: now)
             case .countdown(let endsAt) where session.isRinging:
                 let checkAt = session.wakeCheckMinutes > 0
                     ? endsAt.addingTimeInterval(TimeInterval(session.wakeCheckMinutes) * 60) : nil
@@ -68,7 +78,7 @@ public enum BackupPlanner {
             .filter { !completed.contains($0.key) && $0.key != session?.occurrence }
             .sorted { $0.fireDate < $1.fireDate }
         for occurrence in pending {
-            let first = occurrence.fireDate.addingTimeInterval(TimeInterval(occurrence.alarm.gentleSeconds))
+            let first = occurrence.fireDate.addingTimeInterval(TimeInterval(min(occurrence.alarm.gentleSeconds, longestGentleWait)))
             for k in 0..<perOccurrenceMax where result.count < budget {
                 result.append(PlannedNotification(occurrence: occurrence.key,
                                                   fireDate: first.addingTimeInterval(interval * Double(k))))
@@ -78,11 +88,21 @@ public enum BackupPlanner {
         return result.sorted { $0.fireDate < $1.fireDate }
     }
 
+    /// Counted from the alarm time. One less than a second away could be too late to schedule.
+    private static func nudges(_ session: RingSession, now: Date) -> [PlannedNotification] {
+        (0..<nudgeCount)
+            .map { session.occurrence.fireDate.addingTimeInterval(firstNudge + nudgeGap * Double($0)) }
+            .filter { $0.timeIntervalSince(now) > 1 }
+            .map { PlannedNotification(occurrence: session.occurrence, fireDate: $0, kind: .nudge) }
+    }
+
     /// Backups for a ring in progress, sliding forward from `now`. They hold off until
     /// a gentle wake-up has finished, so they don't cut across it at full volume.
     private static func ring(_ session: RingSession, count: Int, until end: Date?, now: Date) -> [PlannedNotification] {
         var base = now
-        if let gentleEnd = session.gentleEndsAt, gentleEnd > now { base = gentleEnd.addingTimeInterval(-interval) }
+        if let gentleEnd = session.gentleEndsAt, gentleEnd > now {
+            base = min(gentleEnd, now.addingTimeInterval(gentleSlide)).addingTimeInterval(-interval)
+        }
         var result: [PlannedNotification] = []
         for k in 1...count {
             let fireDate = base.addingTimeInterval(interval * Double(k))
