@@ -8,7 +8,9 @@ final class MissionSensor: ObservableObject {
     @Published private(set) var unavailable = false
     @Published private(set) var lastProgress = Date()
 
-    private let pedometer = CMPedometer()
+    /// Created only for a step mission: touching it can bring up the Motion access dialog,
+    /// which would cover the alarm screens.
+    private var pedometer: CMPedometer?
     private let motion = CMMotionManager()
     private let queue: OperationQueue = {
         let queue = OperationQueue()
@@ -38,7 +40,7 @@ final class MissionSensor: ObservableObject {
     }
 
     func stop() {
-        pedometer.stopUpdates()
+        pedometer?.stopUpdates()
         motion.stopDeviceMotionUpdates()
         #if DEBUG
         fakeTimer?.invalidate()
@@ -78,6 +80,8 @@ final class MissionSensor: ObservableObject {
             unavailable = true
             return
         }
+        let pedometer = CMPedometer()
+        self.pedometer = pedometer
         pedometer.startUpdates(from: Date()) { [weak self] data, error in
             DispatchQueue.main.async {
                 if let error {
