@@ -36,6 +36,9 @@ final class AppModel: ObservableObject {
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        #if DEBUG
+        UITestHarness.seedIfRequested(support: support)
+        #endif
         store = StateStore(fileURL: support.appendingPathComponent("state.json"))
         photos = ObjectPhotoStore(directory: support.appendingPathComponent("objects"))
         state = store.load()

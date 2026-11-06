@@ -9,7 +9,8 @@ targets:
     platform: iOS
     sources: [App]
     dependencies: [{ package: AlarmyCore }]
-    scheme: {}
+    scheme:
+      testTargets: [AlarmyUITests]
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.inverspe.alarmy
       MARKETING_VERSION: "0.1"
@@ -27,3 +28,12 @@ targets:
         NSCameraUsageDescription: "Alarmy photographs your registered objects to turn off the alarm."
         NSMotionUsageDescription: "Alarmy counts your steps to turn off the alarm."
         UIRequiresFullScreen: true
+  AlarmyUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies: [{ target: Alarmy }]
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.inverspe.alarmy.uitests
+      GENERATE_INFOPLIST_FILE: YES
+      TEST_TARGET_NAME: Alarmy

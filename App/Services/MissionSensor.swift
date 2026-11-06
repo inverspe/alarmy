@@ -18,9 +18,18 @@ final class MissionSensor: ObservableObject {
     // Only touched on `queue`.
     private var shakes = ShakeCounter()
     private var squats = SquatCounter()
+    #if DEBUG
+    private var fakeTimer: Timer?
+    #endif
 
     func start(_ kind: MissionKind) {
         lastProgress = Date()
+        #if DEBUG
+        if let mode = UITestHarness.sensorMode {
+            startFake(mode)
+            return
+        }
+        #endif
         switch kind {
         case .steps: startSteps()
         case .squats, .shake: startMotion(kind)
@@ -31,7 +40,26 @@ final class MissionSensor: ObservableObject {
     func stop() {
         pedometer.stopUpdates()
         motion.stopDeviceMotionUpdates()
+        #if DEBUG
+        fakeTimer?.invalidate()
+        #endif
     }
+
+    #if DEBUG
+    private func startFake(_ mode: String) {
+        switch mode {
+        case "none":
+            unavailable = true
+        case "count":
+            fakeTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                self.update(self.count + 1)
+            }
+        default:
+            break
+        }
+    }
+    #endif
 
     /// Asks for Motion access. Called when a step mission is added, so the question
     /// doesn't first come up while the alarm is ringing.

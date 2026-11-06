@@ -58,7 +58,7 @@ struct RingingView: View {
 
             Text(session.isEarlyClear
                  ? "To clear your \(Theme.timeString(session.occurrence.fireDate)) alarm, go find"
-                 : session.missedWakeChecks > 0 ? "You missed your check. Go find" : "Go find")
+                 : "Go find")
                 .font(.system(size: 17, weight: .medium))
                 .padding(.top, 26)
                 .padding(.bottom, 4)

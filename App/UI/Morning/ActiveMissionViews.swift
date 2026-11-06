@@ -34,14 +34,20 @@ extension MissionKind {
     }
 }
 
-/// "Mission 2 of 3", only when there's more than one.
+/// "Mission 2 of 3" when there's more than one, and a reminder after a missed wake-up check.
 struct MissionPositionLabel: View {
     let session: RingSession
 
     var body: some View {
-        if session.missions.count > 1 {
-            Text("Mission \(session.missionIndex + 1) of \(session.missions.count)")
-                .font(.system(size: 15, weight: .bold))
+        VStack(alignment: .leading, spacing: 2) {
+            if session.missedWakeChecks > 0 {
+                Text("You missed your check")
+                    .font(.system(size: 17, weight: .heavy))
+            }
+            if session.missions.count > 1 {
+                Text("Mission \(session.missionIndex + 1) of \(session.missions.count)")
+                    .font(.system(size: 15, weight: .bold))
+            }
         }
     }
 }
@@ -98,6 +104,7 @@ struct CountedMissionView: View {
                 Text("of \(step.amount)").font(Theme.display(26))
             }
             .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("mission-count")
             ProgressView(value: Double(done), total: Double(step.amount))
                 .tint(Theme.night)
                 .padding(.top, 10)
@@ -164,6 +171,7 @@ struct MathMissionView: View {
                 .font(.system(size: 17, weight: .medium))
                 .padding(.top, 8)
             Text(problem.text)
+                .accessibilityIdentifier("math-problem")
                 .font(Theme.display(40))
                 .minimumScaleFactor(0.6)
                 .lineLimit(1)
