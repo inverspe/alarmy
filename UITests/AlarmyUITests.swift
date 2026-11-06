@@ -159,6 +159,16 @@ final class AlarmyUITests: XCTestCase {
         shot("after-relaunch")
     }
 
+    /// A dialog here would cover the alarm screens. iOS only ever asks once per install, and
+    /// no earlier test (tests run alphabetically) finishes a counted mission, so it's still unanswered.
+    func testCountingMissionDoesNotAskForMotionAccess() {
+        launch(missions: "shake:10")
+        expect("Mission done ✓", within: 25)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        XCTAssertFalse(springboard.alerts.firstMatch.waitForExistence(timeout: 5), "A permission dialog covered the alarm")
+        shot("no-motion-dialog")
+    }
+
     func testEarlyClearCanBeBackedOutOfThenFinishes() {
         launch(ring: "soon", missions: "math:1")
         let clear = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Up early?'")).firstMatch
