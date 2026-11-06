@@ -25,4 +25,5 @@ targets:
         UIBackgroundModes: [audio]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSCameraUsageDescription: "Alarmy photographs your registered objects to turn off the alarm."
+        NSMotionUsageDescription: "Alarmy counts your steps to turn off the alarm."
         UIRequiresFullScreen: true

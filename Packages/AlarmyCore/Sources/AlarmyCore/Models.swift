@@ -29,7 +29,7 @@ public struct Alarm: Codable, Identifiable, Equatable {
     public var wakeCheckMinutes: Int
     /// Done in this order when the alarm rings.
     public var missions: [MissionStep]
-    public var needsObjects: Bool { true }
+    public var needsObjects: Bool { missions.contains { $0.kind == .photo } }
 
     public init(id: UUID = UUID(), hour: Int, minute: Int, repeatDays: Set<Weekday> = [],
                 isEnabled: Bool = true, sound: AlarmSound = .klaxon, ringAfterMinutes: Int = 10,
@@ -67,7 +67,7 @@ public struct Alarm: Codable, Identifiable, Equatable {
         earlyClearMinutes = try c.decodeIfPresent(Int.self, forKey: .earlyClearMinutes) ?? 30
         gentleSeconds = try c.decodeIfPresent(Int.self, forKey: .gentleSeconds) ?? 0
         wakeCheckMinutes = try c.decodeIfPresent(Int.self, forKey: .wakeCheckMinutes) ?? 0
-        missions = [.photo]
+        missions = ((try? c.decodeIfPresent([MissionStep].self, forKey: .missions)) ?? [.photo]).cleaned
     }
 }
 

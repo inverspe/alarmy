@@ -130,7 +130,7 @@ final class AppModel: ObservableObject {
         if s.ringSession == nil,
            let due = Schedule.activeOccurrence(s.alarms, completed: s.completed, now: t, calendar: calendar) {
             s.ringSession = RingSession.start(occurrence: due.key, ringAfterMinutes: due.alarm.ringAfterMinutes,
-                                              isEarlyClear: false, objectIDs: usableObjectIDs(in: s),
+                                              isEarlyClear: false, objectIDs: usableObjectIDs(in: s), missions: due.alarm.missions,
                                               wakeCheckMinutes: due.alarm.wakeCheckMinutes, gentleSeconds: due.alarm.gentleSeconds,
                                               now: t, using: &rng)
         }
@@ -160,13 +160,13 @@ final class AppModel: ObservableObject {
     // MARK: Actions
 
     /// Applies a change unless the edit lock is held, or the change would leave an
-    /// alarm enabled with no objects to photograph.
+    /// alarm with a photo mission enabled and no objects to photograph.
     @discardableResult
     func update(_ change: (inout AppState) -> Void) -> Bool {
         guard !isLocked else { return false }
         var s = state
         change(&s)
-        if s.objects.isEmpty && s.alarms.contains(where: \.isEnabled) { return false }
+        if s.objects.isEmpty && s.alarms.contains(where: { $0.isEnabled && $0.needsObjects }) { return false }
         s.completed = Completion.suppressFired(old: state.alarms, new: s.alarms, completed: s.completed,
                                                now: trustedNow(), calendar: calendar)
         commit(s)
@@ -191,7 +191,8 @@ final class AppModel: ObservableObject {
         guard let occurrence = earlyClearable else { return }
         var s = state
         s.ringSession = RingSession.start(occurrence: occurrence.key, ringAfterMinutes: occurrence.alarm.ringAfterMinutes,
-                                          isEarlyClear: true, objectIDs: usableObjectIDs(in: s), now: trustedNow(), using: &rng)
+                                          isEarlyClear: true, objectIDs: usableObjectIDs(in: s), missions: occurrence.alarm.missions,
+                                          now: trustedNow(), using: &rng)
         commit(s)
         tick()
     }
@@ -202,6 +203,16 @@ final class AppModel: ObservableObject {
         var s = state
         s.ringSession = nil
         commit(s)
+    }
+
+    /// A steps, squats, shake or math mission was finished. Moves on to the next one.
+    func completeMission(_ kind: MissionKind) {
+        guard var session = state.ringSession, session.currentMission?.kind == kind else { return }
+        session.completeMission(now: trustedNow())
+        var s = state
+        s.ringSession = session
+        commit(s)
+        tick()
     }
 
     /// The owner answered the wake-up check, which ends the alarm for today.
@@ -216,7 +227,7 @@ final class AppModel: ObservableObject {
     }
 
     func submitMissionPhoto(_ image: UIImage) async -> MissionResult? {
-        guard let session = state.ringSession, session.phase == .mission, let object = currentObject else { return nil }
+        guard let session = state.ringSession, session.currentMission?.kind == .photo, let object = currentObject else { return nil }
         let references = object.referencePhotoIDs.compactMap { photos.featurePrint($0) }
         let others = state.objects.filter { $0.id != object.id }
         let otherReferences = others.map { $0.referencePhotoIDs.compactMap { photos.featurePrint($0) } }
@@ -237,12 +248,12 @@ final class AppModel: ObservableObject {
                                         evaluation.threshold, evaluation.closestOther.map { String(format: "%.2f", $0) } ?? "none"))
 
         // The session may have moved on while matching (e.g. fire time passed for an early clear).
-        guard var current = state.ringSession, current.occurrence == session.occurrence, current.phase == .mission else {
+        guard var current = state.ringSession, current.occurrence == session.occurrence, current.currentMission?.kind == .photo else {
             return nil
         }
         var s = state
         if evaluation.matched {
-            current.recordMatch(now: trustedNow())
+            current.completeMission(now: trustedNow())
             s.ringSession = current
             commit(s)
             tick()

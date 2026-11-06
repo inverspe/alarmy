@@ -15,7 +15,7 @@ Success means the owner gets out of bed and stays up. The owner's own expectatio
 
 ## Goals
 
-- A single mission type: **photo of a registered object**, picked at random each morning.
+- Missions per alarm, stacked in any order the owner chooses: **photo of a registered object** (picked at random each morning), **steps**, **squats**, **shake** and **math**. Photo is the default. (Owner changed this from photo only on 2026-11-06.)
 - **Keep ringing after the mission** for a configurable time (default 10 minutes), then stop by itself.
 - **Edit lock**: alarm settings and objects can't be changed during a configurable window before the alarm.
 - **Can't be uninstalled** (achieved with iOS settings plus TrollStore hardening, see below).
@@ -24,7 +24,7 @@ Success means the owner gets out of bed and stays up. The owner's own expectatio
 
 ## Non-goals
 
-- Other mission types (math, shake, steps, QR, etc.). The owner explicitly chose photo only.
+- Other mission types (typing, memory, QR, etc.).
 - Snooze. There is no snooze.
 - App Store distribution, other users, accounts, cloud sync, analytics.
 - iOS 26 AlarmKit (the device is on iOS 16.5.1).
@@ -67,6 +67,17 @@ Flow approved by the owner from wireframes (`.superpowers/brainstorm/.../content
 - There's a strictness setting (loose to strict) so the owner can tune false rejects and false accepts.
 - No skip. An alarm can't be enabled with zero registered objects.
 - **Fallback when the mission can't be done (owner approved):** after about 5 failed attempts on the same object, the app switches to a different registered object (random, not the one just failed). It cycles through all objects if needed. There is never a skip, so the owner always has to get up and photograph something. If only one object is registered, it stays on that object, which is why onboarding asks for at least 3.
+
+### Stacked missions (owner requested 2026-11-06)
+
+- Each alarm has an ordered list, with each kind at most once. An alarm can leave photo out, and the editor warns that it could then be finished from bed.
+- All of them must be done, in order, while the alarm rings. The keep-ringing countdown starts after the last one.
+- **Steps, squats, shake:** counted with the motion sensors. The count starts over if the app is closed partway through.
+- **Math:** sums like 14 × 6 + 37. A wrong answer gets a new sum, so answers can't be found by guessing.
+- **Can't be completed:** if a sensor can't be used, or hasn't counted anything for 2 minutes, a button swaps that mission for 5 sums. (My call: this keeps the "mission can't be completed" anti-goal out, but waiting 2 minutes in bed does get out of walking.)
+- A photo mission with no usable objects is dropped from the list. If that leaves nothing, the alarm rings for the countdown.
+- A missed wake-up check restarts the whole list.
+- Only alarms with a photo mission need registered objects.
 
 ### Clearing early (owner approved)
 

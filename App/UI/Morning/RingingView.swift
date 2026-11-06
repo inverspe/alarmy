@@ -11,15 +11,26 @@ struct MorningFlowView: View {
         if let session = model.state.ringSession {
             switch session.phase {
             case .mission:
-                if showCamera {
-                    MissionCameraView()
-                } else {
-                    RingingView(session: session) { showCamera = true }
+                switch session.currentMission?.kind {
+                case .steps, .squats, .shake:
+                    if let step = session.currentMission {
+                        CountedMissionView(session: session, step: step).id(step.kind)
+                    }
+                case .math:
+                    MathMissionView(session: session, sums: session.currentMission?.amount ?? 1) {
+                        model.completeMission(.math)
+                    }
+                case .photo, nil:
+                    if showCamera {
+                        MissionCameraView()
+                    } else {
+                        RingingView(session: session) { showCamera = true }
+                    }
                 }
             case .countdown(let endsAt):
                 CountdownView(endsAt: endsAt,
                               total: TimeInterval(session.ringAfterMinutes) * 60,
-                              hadMission: session.currentObjectID != nil)
+                              hadMission: session.hadMissions)
             case .wakeCheckWaiting(let checkAt):
                 WakeCheckWaitingView(checkAt: checkAt).onAppear { showCamera = false }
             case .wakeCheckPrompt(let deadline):
@@ -42,6 +53,8 @@ struct RingingView: View {
         VStack(alignment: .leading, spacing: 0) {
             ClockText(hour: now.hour ?? 0, minute: now.minute ?? 0, size: 76, color: Theme.night)
                 .padding(.top, 8)
+
+            MissionPositionLabel(session: session).padding(.top, 8)
 
             Text(session.isEarlyClear
                  ? "To clear your \(Theme.timeString(session.occurrence.fireDate)) alarm, go find"

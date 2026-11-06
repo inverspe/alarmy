@@ -46,10 +46,17 @@ public struct RingSession: Codable, Equatable {
         }
     }
 
-    public var missions: [MissionStep] { [] }
-    public var missionIndex: Int { 0 }
-    public var currentMission: MissionStep? { nil }
-    public var hadMissions: Bool { true }
+    /// What has to be done, in order. A session saved by an older build was photo only.
+    public var missions: [MissionStep] { missionsStored ?? (currentObjectID == nil ? [] : [.photo]) }
+    public var missionIndex: Int { missionIndexStored ?? 0 }
+    public var hadMissions: Bool { !missions.isEmpty }
+
+    /// The mission being done right now, if any.
+    public var currentMission: MissionStep? {
+        guard phase == .mission, missions.indices.contains(missionIndex) else { return nil }
+        return missions[missionIndex]
+    }
+
     public var missedWakeChecks: Int { missedWakeChecksStored ?? 0 }
     public var wakeCheckMinutes: Int { wakeCheckMinutesStored ?? 0 }
 
@@ -68,14 +75,16 @@ public struct RingSession: Codable, Equatable {
                                 duration: end.timeIntervalSince(occurrence.fireDate))
     }
 
-    /// With no usable objects there is no mission: it rings for the countdown and then
-    /// stops, so it can never ring forever.
+    /// A photo mission with no usable objects is dropped. With no missions left it rings
+    /// for the countdown and then stops, so it can never ring forever.
     public static func start(occurrence: OccurrenceKey, ringAfterMinutes: Int, isEarlyClear: Bool,
                              objectIDs: [UUID], missions: [MissionStep] = [.photo], wakeCheckMinutes: Int = 0, gentleSeconds: Int = 0, now: Date,
                              using rng: inout some RandomNumberGenerator) -> RingSession {
-        let pick = objectIDs.randomElement(using: &rng)
+        let wantsPhoto = missions.contains { $0.kind == .photo }
+        let pick = wantsPhoto ? objectIDs.randomElement(using: &rng) : nil
+        let missions = pick == nil ? missions.filter { $0.kind != .photo } : missions
         let phase: Phase
-        if pick != nil {
+        if !missions.isEmpty {
             phase = .mission
         } else if isEarlyClear {
             phase = .finished
@@ -108,8 +117,13 @@ public struct RingSession: Codable, Equatable {
         triedObjectIDs.append(next)
     }
 
+    /// Moves on to the next mission. After the last one, the countdown starts.
     public mutating func completeMission(now: Date) {
         guard phase == .mission else { return }
+        if missionIndex + 1 < missions.count {
+            missionIndexStored = missionIndex + 1
+            return
+        }
         phase = isEarlyClear
             ? .finished
             : .countdown(endsAt: now.addingTimeInterval(TimeInterval(ringAfterMinutes) * 60))
@@ -151,7 +165,7 @@ public struct RingSession: Codable, Equatable {
         }
     }
 
-    /// A missed wake-up check: ring again at full volume and do the mission again,
+    /// A missed wake-up check: ring again at full volume and do every mission again,
     /// on a different object when there is one.
     private mutating func startOver(now: Date, availableObjectIDs: [UUID], using rng: inout some RandomNumberGenerator) {
         guard now < hardCapDate else {
@@ -161,10 +175,13 @@ public struct RingSession: Codable, Equatable {
         missedWakeChecksStored = missedWakeChecks + 1
         gentleSecondsStored = nil
         missesOnCurrent = 0
-        let others = availableObjectIDs.filter { $0 != currentObjectID }
-        currentObjectID = others.randomElement(using: &rng) ?? currentObjectID
-        triedObjectIDs = currentObjectID.map { [$0] } ?? []
-        phase = currentObjectID == nil
+        missionIndexStored = 0
+        if missions.contains(where: { $0.kind == .photo }) {
+            let others = availableObjectIDs.filter { $0 != currentObjectID }
+            currentObjectID = others.randomElement(using: &rng) ?? currentObjectID
+            triedObjectIDs = currentObjectID.map { [$0] } ?? []
+        }
+        phase = missions.isEmpty
             ? .countdown(endsAt: now.addingTimeInterval(TimeInterval(ringAfterMinutes) * 60))
             : .mission
     }

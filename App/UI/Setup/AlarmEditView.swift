@@ -49,6 +49,8 @@ struct AlarmEditView: View {
                         }
                     }
 
+                    MissionListEditor(missions: $alarm.missions)
+
                     field("Gentle wake-up") {
                         Picker("Gentle wake-up", selection: $alarm.gentleSeconds) {
                             ForEach(GentleRamp.choices, id: \.self) { Text($0 == 0 ? "Off" : "\($0) s").tag($0) }
@@ -115,6 +117,7 @@ struct AlarmEditView: View {
         let c = Calendar.current.dateComponents([.hour, .minute], from: time)
         alarm.hour = c.hour ?? alarm.hour
         alarm.minute = c.minute ?? alarm.minute
+        alarm.missions = alarm.missions.cleaned
         let edited = alarm
         let ok = model.update { state in
             if let i = state.alarms.firstIndex(where: { $0.id == edited.id }) {
@@ -128,7 +131,7 @@ struct AlarmEditView: View {
         } else {
             error = model.isLocked
                 ? "Alarms can't be changed right now."
-                : "Add at least one object before turning on an alarm."
+                : "Add an object first, or remove the photo mission."
         }
     }
 

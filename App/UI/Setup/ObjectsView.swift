@@ -75,7 +75,7 @@ struct ObjectsView: View {
                     message = model.deleteObject(object.id)
                         ? nil
                         : (model.isLocked ? "Objects can't be changed right now."
-                                          : "Keep at least one object while an alarm is on.")
+                                          : "Keep at least one object while an alarm with a photo mission is on.")
                 }
                 pendingDelete = nil
             }

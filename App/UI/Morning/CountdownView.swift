@@ -44,7 +44,7 @@ struct CountdownView: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 0) {
-                Text(hadMission ? "Mission done ✓" : "No objects to find, so it just rings")
+                Text(hadMission ? "Mission done ✓" : "No missions to do, so it just rings")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(Theme.sunlight)
                 Text(Theme.countdown(remaining))
