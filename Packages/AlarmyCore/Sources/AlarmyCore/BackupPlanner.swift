@@ -31,11 +31,15 @@ public enum BackupPlanner {
     /// With a wake-up check still to come, the budget is shared between the ring now and the repeat later.
     static let ringMaxBeforeCheck = 25
     static let repeatMax = 30
-    public static let appClosedNoticeDelay: TimeInterval = 0
-    public static let appClosedHold: TimeInterval = 0
+    /// The "you closed the app" notice appears this long after closing.
+    public static let appClosedNoticeDelay: TimeInterval = 2.5
+    /// Closing waits this long, because handing a notification to iOS takes a moment and the process is about to end.
+    public static let appClosedHold: TimeInterval = 2
 
+    /// Plans use trusted time, but calendar triggers fire by the clock on screen. This is
+    /// what the screen will show at `fireDate` when the phone's clock has been changed by hand.
     public static func wallClockFireDate(_ fireDate: Date, wall: Date, trusted: Date) -> Date {
-        fireDate
+        fireDate.addingTimeInterval(wall.timeIntervalSince(trusted))
     }
 
     public static func plan(upcoming: [Occurrence], completed: Set<OccurrenceKey>,

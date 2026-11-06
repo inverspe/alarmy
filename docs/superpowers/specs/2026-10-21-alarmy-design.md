@@ -112,7 +112,7 @@ Off by default, set per alarm: 15, 30 or 60 seconds.
 
 ### Closing the app (owner requested 2026-11-06)
 
-Swiping the app closed posts a notification straight away saying so. iOS doesn't guarantee this runs every time, and the backups continue either way.
+Swiping the app closed posts a notification about 2.5 seconds later saying so. The app holds on for 2 seconds while closing so iOS has time to accept it. iOS doesn't guarantee this runs every time, and the backups continue either way.
 
 ### Edit lock
 
@@ -134,8 +134,9 @@ Swiping the app closed posts a notification straight away saying so. iOS doesn't
 | App swiped closed / killed / phone rebooted overnight | **Backup critical-alert notifications** are pre-scheduled about every 30 seconds starting at alarm time. Tapping one opens the app straight into the ringing/mission screen. After a match, backups are rescheduled to end exactly when the countdown ends. Note the iOS limit of 64 pending local notifications. |
 | App suspended before alarm time | Alarmy-style keep-alive: the app keeps a background audio session running while an alarm is armed so it can play the alarm itself at full control. |
 | Volume lowered | While ringing, the app pushes system volume back up. |
+| Earbuds or headphones connected | The ring goes to the phone's own speaker, including when they connect partway through. If iOS refuses, it rings through the current route rather than not at all. |
 | Power off | **Cannot be prevented.** Accepted. |
-| Changing the device clock to escape the lock or alarm | Known risk. The builder should make a reasonable effort, for example reacting to significant time-change notifications by not releasing locks. It doesn't have to be perfect. |
+| Changing the device clock to escape the lock or alarm | Known risk. The builder should make a reasonable effort, for example reacting to significant time-change notifications by not releasing locks. It doesn't have to be perfect. When the clock or time zone changes while the app is running, backups are rescheduled so they still fire at the real alarm time. |
 | Can't match in the dark | Flash, a lighting-tolerant matcher, and the strictness setting. Multiple reference shots per object are allowed (builder's call, see below). |
 
 ## Visual design

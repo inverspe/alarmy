@@ -67,6 +67,16 @@ final class AppModel: ObservableObject {
             // Must run before the process exits, so it can't wait for a Task.
             MainActor.assumeIsolated { self?.appWillTerminate() }
         }
+        // Backups are tied to the clock on screen, so they get redone when it changes.
+        let clockChanges: [Notification.Name] = [UIApplication.significantTimeChangeNotification, .NSSystemClockDidChange, .NSSystemTimeZoneDidChange]
+        for name in clockChanges {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.planDirty = true
+                    self?.tick()
+                }
+            }
+        }
         tick()
     }
 
@@ -156,7 +166,7 @@ final class AppModel: ObservableObject {
 
         let ringing = state.ringSession?.isRinging ?? false
         if planDirty || (ringing && t.timeIntervalSince(lastPlanAt) >= 60) || t.timeIntervalSince(lastPlanAt) >= 900 {
-            replan(at: t)
+            replan(at: t, wall: wall)
         }
     }
 
@@ -369,14 +379,15 @@ final class AppModel: ObservableObject {
         guard active || state.alarms.contains(where: \.isEnabled) else { return }
         DiagnosticLog.shared.add("app closed, active session=\(active)")
         notifications.postAppClosedNotice(ringing: active)
+        Thread.sleep(forTimeInterval: BackupPlanner.appClosedHold)
     }
 
-    private func replan(at t: Date) {
+    private func replan(at t: Date, wall: Date) {
         let upcoming = Schedule.upcoming(state.alarms, after: t, calendar: calendar, limit: 3)
         let plan = BackupPlanner.plan(upcoming: upcoming, completed: Set(state.completed.keys),
                                       session: state.ringSession, now: t)
         let alarms = state.alarms
-        notifications.apply(plan, soundFor: { key in alarms.first { $0.id == key.alarmID }?.sound ?? .klaxon }, calendar: calendar)
+        notifications.apply(plan, soundFor: { key in alarms.first { $0.id == key.alarmID }?.sound ?? .klaxon }, calendar: calendar, wall: wall, trusted: t)
         lastPlanAt = t
         planDirty = false
     }

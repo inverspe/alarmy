@@ -53,17 +53,20 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// Replaces every pending request with `plan`. No-op when the plan hasn't changed.
-    func apply(_ plan: [PlannedNotification], soundFor: (OccurrenceKey) -> AlarmSound, calendar: Calendar = .current) {
+    func apply(_ plan: [PlannedNotification], soundFor: (OccurrenceKey) -> AlarmSound, calendar: Calendar = .current,
+               wall: Date, trusted: Date) {
         let critical = criticalEnabled
-        let ids = plan.map { "\($0.id)-\(soundFor($0.occurrence).rawValue)-\(critical)" }
+        // A new time zone or a changed clock moves when the triggers fire, even though the plan is the same.
+        let clock = "\(calendar.timeZone.identifier)-\(Int(wall.timeIntervalSince(trusted) / 60))"
+        let ids = plan.map { "\($0.id)-\(soundFor($0.occurrence).rawValue)-\(critical)-\(clock)" }
         guard ids != lastApplied else { return }
         lastApplied = ids
         center.removeAllPendingNotificationRequests()
-        for item in plan {
+        for (index, item) in plan.enumerated() {
             let content = UNMutableNotificationContent()
             switch item.kind {
             case .alarm:
-                content.title = "Alarm"
+                content.title = BackupCopy.title(at: index)
                 content.body = "Open Alarmy to do your mission."
                 content.sound = BackupSounds.notificationSound(soundFor(item.occurrence), critical: critical)
             case .wakeCheck:
@@ -77,7 +80,8 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
                 "fireDate": item.occurrence.fireDate.timeIntervalSince1970,
                 "kind": item.kind.rawValue,
             ]
-            let components = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: item.fireDate)
+            let onScreen = BackupPlanner.wallClockFireDate(item.fireDate, wall: wall, trusted: trusted)
+            let components = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: onScreen)
             let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
             center.add(UNNotificationRequest(identifier: item.id, content: content, trigger: trigger))
         }
@@ -87,7 +91,7 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
         center.removeAllDeliveredNotifications()
     }
 
-    /// Tells the owner right away that they closed the app. Pending backups carry on regardless,
+    /// Tells the owner that they closed the app. Pending backups carry on regardless,
     /// but they can't ring through the silent switch the way the running app can.
     func postAppClosedNotice(ringing: Bool) {
         let content = UNMutableNotificationContent()
@@ -97,7 +101,7 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
             : "Open it again so your alarm can ring at full volume, even in silent mode."
         content.sound = .default
         content.interruptionLevel = .critical
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: BackupPlanner.appClosedNoticeDelay, repeats: false)
         center.add(UNNotificationRequest(identifier: "app-closed", content: content, trigger: trigger))
     }
 

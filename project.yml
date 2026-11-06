@@ -27,6 +27,7 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSCameraUsageDescription: "Alarmy photographs your registered objects to turn off the alarm."
         NSMotionUsageDescription: "Alarmy counts your steps to turn off the alarm."
+        NSMicrophoneUsageDescription: "Alarmy never records you. iOS needs this on file to send the alarm to the phone's speaker while earbuds are connected."
         UIRequiresFullScreen: true
   AlarmyUITests:
     type: bundle.ui-testing

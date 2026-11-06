@@ -23,6 +23,11 @@ final class AlarmAudio {
     private let ring = OSAllocatedUnfairLock<Ring?>(initialState: nil)
     private var keepAlive = false
     private(set) var isRinging = false
+    private var speakerForced = false
+    /// iOS wouldn't send this ring to the speaker, so it rings through the current route rather than not at all.
+    private var speakerRefused = false
+    private var engineOnSpeakerSession = false
+    private var lastOptions: AVAudioSession.CategoryOptions?
     private let log = DiagnosticLog.shared
 
     /// Session options while ringing. Must stay mixable: iOS refuses to activate an
@@ -43,9 +48,15 @@ final class AlarmAudio {
         center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: session, queue: .main) { [weak self] _ in
             guard let self else { return }
             self.log.add("media services reset")
-            self.engine.stop()
-            self.engine = AVAudioEngine()
-            self.buildGraph()
+            self.rebuildEngine()
+            self.resume()
+        }
+        // Earbuds connecting partway through a ring.
+        center.addObserver(forName: AVAudioSession.routeChangeNotification, object: session, queue: .main) { [weak self] note in
+            guard let self, self.isRinging,
+                  let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                  AVAudioSession.RouteChangeReason(rawValue: raw) == .newDeviceAvailable else { return }
+            self.log.add("new audio device while ringing")
             self.resume()
         }
         center.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] _ in
@@ -89,7 +100,20 @@ final class AlarmAudio {
     func stopRinging() {
         ring.withLock { $0 = nil }
         isRinging = false
+        if speakerForced {
+            do { try AVAudioSession.sharedInstance().overrideOutputAudioPort(.none) } catch {
+                log.add("speaker release failed: \(describe(error))")
+            }
+        }
+        speakerForced = false
+        speakerRefused = false
         if keepAlive { resume() } else { shutDown() }
+    }
+
+    private func rebuildEngine() {
+        engine.stop()
+        engine = AVAudioEngine()
+        buildGraph()
     }
 
     private func buildGraph() {
@@ -122,19 +146,68 @@ final class AlarmAudio {
         guard keepAlive || isRinging else { return }
         let session = AVAudioSession.sharedInstance()
         let options: AVAudioSession.CategoryOptions = isRinging ? ringOptions : [.mixWithOthers]
-        let changing = session.category != .playback || session.categoryOptions != options
-        if changing && engine.isRunning {
-            engine.stop()
-            do { try session.setActive(false) } catch { log.add("deactivate failed: \(describe(error))") }
+        let outputs = session.currentRoute.outputs.map(\.portType.rawValue)
+        if isRinging, !speakerRefused, AudioRoute.shouldForceSpeaker(outputs: outputs, alreadyForced: speakerForced) {
+            forceSpeaker(options: options)
+        } else {
+            activate(.playback, options: options)
         }
-        do { try session.setCategory(.playback, mode: .default, options: options) } catch {
-            log.add("setCategory failed: \(describe(error))")
+        // The hardware format can differ between the two sessions, and a graph built for one may not start on the other.
+        let onSpeakerSession = session.category == .playAndRecord
+        if onSpeakerSession != engineOnSpeakerSession {
+            engineOnSpeakerSession = onSpeakerSession
+            rebuildEngine()
         }
-        do { try session.setActive(true) } catch { log.add("activate failed: \(describe(error))") }
         if !engine.isRunning {
             do { try engine.start() } catch { log.add("engine start failed: \(describe(error))") }
         }
-        log.add("resume ringing=\(isRinging) options=\(options.rawValue) otherAudio=\(session.isOtherAudioPlaying) running=\(engine.isRunning)")
+        log.add("resume ringing=\(isRinging) options=\(options.rawValue) speaker=\(speakerForced) otherAudio=\(session.isOtherAudioPlaying) running=\(engine.isRunning) route=\(session.currentRoute.outputs.map(\.portType.rawValue).joined(separator: ","))")
+    }
+
+    /// Sends the ring to the phone's own speaker. If iOS won't allow it, ringing through
+    /// the earbuds still beats silence.
+    private func forceSpeaker(options: AVAudioSession.CategoryOptions) {
+        if activate(.playAndRecord, options: options.union(.defaultToSpeaker)) {
+            do {
+                try AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
+                if !speakerForced { log.add("ring sent to the phone speaker") }
+                speakerForced = true
+            } catch {
+                log.add("speaker override failed: \(describe(error))")
+                speakerForced = false
+                speakerRefused = true
+            }
+        } else if activate(.playback, options: options) {
+            // Only give up on the speaker if the plain session works. During a phone
+            // call both fail, and the next tick tries again.
+            log.add("speaker session refused, ringing through the current route")
+            speakerForced = false
+            speakerRefused = true
+        }
+    }
+
+    @discardableResult
+    private func activate(_ category: AVAudioSession.Category, options: AVAudioSession.CategoryOptions) -> Bool {
+        let session = AVAudioSession.sharedInstance()
+        // iOS can report more options than were asked for, and that alone mustn't restart a ring.
+        let sameOptions = session.categoryOptions == options || lastOptions == options
+        if (session.category != category || !sameOptions) && engine.isRunning {
+            engine.stop()
+            do { try session.setActive(false) } catch { log.add("deactivate failed: \(describe(error))") }
+        }
+        var succeeded = true
+        do {
+            try session.setCategory(category, mode: .default, options: options)
+            lastOptions = options
+        } catch {
+            log.add("setCategory failed: \(describe(error))")
+            succeeded = false
+        }
+        do { try session.setActive(true) } catch {
+            log.add("activate failed: \(describe(error))")
+            succeeded = false
+        }
+        return succeeded
     }
 
     private func shutDown() {
