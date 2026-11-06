@@ -76,10 +76,10 @@ Flow approved by the owner from wireframes (`.superpowers/brainstorm/.../content
 - **Quiet during missions (per alarm, on by default):** starting a mission stops the sound, without stopping anything else. It stays stopped from one mission to the next. There's a switch on the mission screen for that one ring, which isn't saved. Leaving the app brings the sound back straight away.
 - **20 seconds of nothing:** a bar shows the time left, and any input starts it again: a key, the shutter, or a count. When it runs out the mission closes, the sound comes back and the list starts over from the first mission. Missions keep their place if the app is closed.
 - **Steps:** one for each second of movement, not real footsteps, from how much the accelerometer varies. Ten sharp jolts within 3 seconds freezes the count and vibrates, then 1 second later takes off 10 steps, and 1 second after that it carries on. Standing still for 3 seconds gives a nudge at no cost.
-- **Squats:** two fingers held on the screen for 2 seconds start the mission. Then each 2 seconds of movement counts once if the phone is upright and hasn't been twisted about, and it either moved hard enough or a whole down-and-up was seen. Movement that doesn't count gives a vibration. That second way of counting is ours and may need tuning.
+- **Squats:** two fingers held on the screen for 2 seconds start the mission. Then each 2 seconds of movement counts once if the phone is upright with its screen facing the owner and hasn't been twisted about, and it either moved hard enough or a whole down-and-up was seen. Movement that doesn't count gives a vibration. That second way of counting is ours and may need tuning.
 - **Shake:** a sharp change in the accelerometer, at most five a second, at one of five strengths per alarm. Stopping for 3 seconds vibrates and shows "paused", with nothing lost.
 - **Math:** seven difficulties per alarm, from 4 + 7 up to 240 × 35 + 1200. The default is like 24 × 7 + 35. A wrong answer clears the entry and keeps the same sum.
-- **Can't be completed:** if a sensor can't be used, or hasn't counted anything in 2 minutes of mission time, a button swaps that mission for 5 sums. (My call: this keeps the "mission can't be completed" anti-goal out, but waiting 2 minutes in bed does get out of walking.)
+- **Can't be completed:** if a sensor can't be used, or hasn't got any further in 2 minutes of mission time, a button swaps that mission for 5 sums. (My call: this keeps the "mission can't be completed" anti-goal out, but waiting 2 minutes in bed does get out of walking.)
 - A photo mission with no usable objects is dropped from the list. If that leaves nothing, the alarm rings for the countdown.
 - A missed wake-up check restarts the whole list.
 - Only alarms with a photo mission need registered objects.
@@ -88,7 +88,7 @@ Flow approved by the owner from wireframes (`.superpowers/brainstorm/.../content
 
 - If the owner is already up, they can complete the photo mission **before** the alarm to cancel that morning's ring entirely, with no countdown.
 - My call: this is only available within **30 minutes before** the alarm time, so it can't be used at 3 AM. It's configurable per alarm, and the setting is subject to the edit lock.
-- Clearing early cancels that occurrence's pre-scheduled backup notifications and ends the edit lock for that occurrence.
+- Finishing an early clear cancels that occurrence's pre-scheduled backup notifications and ends the edit lock for that occurrence. Until it's finished the backups stay in place, in case the app dies partway through.
 
 ### Keep-ringing countdown
 

@@ -616,3 +616,52 @@ final class SquatCounterTests: XCTestCase {
         XCTAssertEqual(SquatCounter.ruleScore(meanY: 0, meanZ: 0, accelerationSpread: 0.2, rotationSpread: 0.05), 0)
     }
 }
+
+final class MissionStuckTrackerTests: XCTestCase {
+    func testStuckAfterTwoMinutesOfMissionTime() {
+        var tracker = MissionStuckTracker()
+        tracker.add(119, to: .squats)
+        XCTAssertFalse(tracker.isStuck(.squats))
+        tracker.add(1, to: .squats)
+        XCTAssertTrue(tracker.isStuck(.squats))
+    }
+
+    func testTimeAddsUpAcrossTries() {
+        var tracker = MissionStuckTracker()
+        for _ in 0..<6 { tracker.add(20, to: .shake) }
+        XCTAssertTrue(tracker.isStuck(.shake))
+    }
+
+    func testCountingStartsTheTimeAgain() {
+        var tracker = MissionStuckTracker()
+        tracker.add(119, to: .steps)
+        tracker.counted(1, for: .steps)
+        tracker.add(119, to: .steps)
+        XCTAssertFalse(tracker.isStuck(.steps))
+    }
+
+    /// One shake now and then, with the count starting over each try, must not hide the way out.
+    func testARareCountThatNeverGetsFurtherStillEndsUpStuck() {
+        var tracker = MissionStuckTracker()
+        tracker.counted(1, for: .shake)
+        for _ in 0..<6 {
+            tracker.add(20, to: .shake)
+            tracker.counted(1, for: .shake)
+        }
+        XCTAssertTrue(tracker.isStuck(.shake))
+    }
+
+    func testEachMissionIsTrackedSeparately() {
+        var tracker = MissionStuckTracker()
+        tracker.add(120, to: .steps)
+        XCTAssertTrue(tracker.isStuck(.steps))
+        XCTAssertFalse(tracker.isStuck(.squats))
+    }
+
+    func testTimeNeverRunsBackwards() {
+        var tracker = MissionStuckTracker()
+        tracker.add(120, to: .steps)
+        tracker.add(-500, to: .steps)
+        XCTAssertTrue(tracker.isStuck(.steps))
+    }
+}

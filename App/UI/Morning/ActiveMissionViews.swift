@@ -260,7 +260,7 @@ struct CountedMissionView: View {
                 return
             }
             lastCount = count
-            model.noteMissionProgress(step.kind)
+            model.noteMissionProgress(step.kind, count: count)
             if step.kind == .squats { Haptics.tap() }
             guard count >= step.amount else { return }
             DiagnosticLog.shared.add("\(step.kind.rawValue) mission done: \(count)")
@@ -315,7 +315,7 @@ struct CountedMissionView: View {
         case .paused: return "Paused. Keep shaking."
         case .resting: return "Don't stop. Keep walking."
         case .frozen: return "Too much shaking. That costs you 10 steps."
-        case .notCounted: return "That didn't count. Hold your phone to your chest."
+        case .notCounted: return "That didn't count. Keep the screen facing you."
         case nil: return nil
         }
     }
@@ -331,7 +331,7 @@ struct CountedMissionView: View {
     private var instructions: String {
         switch step.kind {
         case .steps: return "Carry your phone and keep moving. Shaking it costs you steps."
-        case .squats: return "Hold your phone against your chest. Go all the way down, then stand all the way up."
+        case .squats: return "Hold your phone to your chest with the screen facing you. Go all the way down, then stand all the way up."
         default: return "Hold on tight and shake it hard."
         }
     }

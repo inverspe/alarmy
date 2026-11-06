@@ -57,9 +57,17 @@ final class BackupPlannerTests: XCTestCase {
         XCTAssertTrue(p.allSatisfy { $0.fireDate < t + 600 })
     }
 
-    func testEarlyClearSessionPlansNothingForItself() {
+    func testEarlyClearKeepsItsBackupsInCaseTheAppDies() {
         let o = occ(a, "2026-10-21 06:30")
-        XCTAssertTrue(plan(upcoming: [o], session: mission(o, early: true), now: "2026-10-21 06:10").isEmpty)
+        let p = plan(upcoming: [o], session: mission(o, early: true), now: "2026-10-21 06:10")
+        XCTAssertEqual(p.count, 40)
+        XCTAssertEqual(p.first?.fireDate, o.fireDate)
+        XCTAssertTrue(p.allSatisfy { $0.kind == .alarm })
+    }
+
+    func testFinishedEarlyClearCancelsItsBackups() {
+        let o = occ(a, "2026-10-21 06:30")
+        XCTAssertTrue(plan(upcoming: [o], completed: [o.key], session: nil, now: "2026-10-21 06:12").isEmpty)
     }
 
     func testSessionOccurrenceNotDoubleBooked() {

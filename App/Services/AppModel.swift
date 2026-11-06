@@ -37,8 +37,7 @@ final class AppModel: ObservableObject {
     private var modelRinging = false
     private var modelKeepAlive = false
     private var missionAttempt: MissionAttempt?
-    /// Mission time without a count, kept across attempts because each one closes after 20 seconds.
-    private var stuckSeconds: [MissionKind: TimeInterval] = [:]
+    private var stuck = MissionStuckTracker()
     private var lastMissionTick: TimeInterval = 0
     private var lastVibration: TimeInterval = 0
     /// Constant for the life of the process; a different value means the phone rebooted.
@@ -237,7 +236,7 @@ final class AppModel: ObservableObject {
     func cancelEarlyClear() {
         guard let session = state.ringSession, session.isEarlyClear else { return }
         closeMission()
-        stuckSeconds = [:]
+        stuck = MissionStuckTracker()
         var s = state
         s.ringSession = nil
         commit(s)
@@ -263,13 +262,13 @@ final class AppModel: ObservableObject {
     }
 
     /// The sensor counted something, so it's working.
-    func noteMissionProgress(_ kind: MissionKind) {
+    func noteMissionProgress(_ kind: MissionKind, count: Int) {
         noteMissionInput()
-        stuckSeconds[kind] = 0
+        stuck.counted(count, for: kind)
     }
 
     func isMissionStuck(_ kind: MissionKind) -> Bool {
-        stuckSeconds[kind, default: 0] >= MissionAttempt.stuckAfter
+        stuck.isStuck(kind)
     }
 
     var isMissionSoundOn: Bool { !missionQuiet }
@@ -392,7 +391,7 @@ final class AppModel: ObservableObject {
     // MARK: Private
 
     private func finish(_ session: RingSession, in s: inout AppState, at t: Date) {
-        stuckSeconds = [:]
+        stuck = MissionStuckTracker()
         s.completed = Completion.markFinished(session.occurrence, at: t, alarms: s.alarms,
                                               completed: s.completed, calendar: calendar)
         if let i = s.alarms.firstIndex(where: { $0.id == session.occurrence.alarmID }), s.alarms[i].repeatDays.isEmpty {
@@ -408,15 +407,19 @@ final class AppModel: ObservableObject {
     /// Closes a mission that has ended or run out of time.
     private func syncMission() {
         guard missionOpen else { return }
-        guard let session = state.ringSession, session.phase == .mission, let attempt = missionAttempt else {
+        guard let session = state.ringSession, session.phase == .mission, missionAttempt != nil else {
             closeMission()
             return
         }
         let time = Self.monotonic()
         if let kind = session.currentMission?.kind, kind != .photo, kind != .math {
-            stuckSeconds[kind, default: 0] += max(0, time - lastMissionTick)
+            let wasStuck = stuck.isStuck(kind)
+            stuck.add(time - lastMissionTick, to: kind)
+            // A full 20 seconds to read the way out that has just appeared.
+            if !wasStuck && stuck.isStuck(kind) { missionAttempt?.input(at: time) }
         }
         lastMissionTick = time
+        guard let attempt = missionAttempt else { return }
         missionSecondsLeft = attempt.remaining(at: time)
         guard attempt.timedOut(at: time) else { return }
 

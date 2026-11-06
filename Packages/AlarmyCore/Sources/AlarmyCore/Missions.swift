@@ -166,8 +166,6 @@ public struct MathProblem: Equatable {
 /// How long a mission waits for input before it closes and the sound comes back.
 public struct MissionAttempt: Equatable {
     public static let idleLimit: TimeInterval = 20
-    /// A sensor that hasn't counted anything in this much mission time is treated as broken.
-    public static let stuckAfter: TimeInterval = 120
 
     private var lastInput: TimeInterval
 
@@ -185,5 +183,31 @@ public struct MissionAttempt: Equatable {
 
     public func timedOut(at time: TimeInterval) -> Bool {
         remaining(at: time) <= 0
+    }
+}
+
+/// Notices a sensor that isn't getting anywhere, so a mission can always be finished some other way.
+/// It looks across tries, because each try closes after 20 seconds of nothing and its count starts over.
+public struct MissionStuckTracker: Equatable {
+    public static let limit: TimeInterval = 120
+
+    private var seconds: [MissionKind: TimeInterval] = [:]
+    private var best: [MissionKind: Int] = [:]
+
+    public init() {}
+
+    /// Time spent with this mission open.
+    public mutating func add(_ elapsed: TimeInterval, to kind: MissionKind) {
+        seconds[kind, default: 0] += max(0, elapsed)
+    }
+
+    /// Only getting further than ever before shows it's working: a slow sensor that
+    /// keeps restarting from zero would otherwise never count as stuck.
+    public mutating func counted(_ count: Int, for kind: MissionKind) {
+        seconds[kind] = 0
+    }
+
+    public func isStuck(_ kind: MissionKind) -> Bool {
+        seconds[kind, default: 0] >= Self.limit
     }
 }
