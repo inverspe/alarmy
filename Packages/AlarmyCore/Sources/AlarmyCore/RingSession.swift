@@ -28,6 +28,8 @@ public struct RingSession: Codable, Equatable {
     private let wakeCheckMinutesStored: Int?
     private var gentleSecondsStored: Int?
     private var missedWakeChecksStored: Int?
+    private var missionsStored: [MissionStep]?
+    private var missionIndexStored: Int?
 
     public var isRinging: Bool {
         guard !isEarlyClear else { return false }
@@ -44,6 +46,10 @@ public struct RingSession: Codable, Equatable {
         }
     }
 
+    public var missions: [MissionStep] { [] }
+    public var missionIndex: Int { 0 }
+    public var currentMission: MissionStep? { nil }
+    public var hadMissions: Bool { true }
     public var missedWakeChecks: Int { missedWakeChecksStored ?? 0 }
     public var wakeCheckMinutes: Int { wakeCheckMinutesStored ?? 0 }
 
@@ -65,7 +71,7 @@ public struct RingSession: Codable, Equatable {
     /// With no usable objects there is no mission: it rings for the countdown and then
     /// stops, so it can never ring forever.
     public static func start(occurrence: OccurrenceKey, ringAfterMinutes: Int, isEarlyClear: Bool,
-                             objectIDs: [UUID], wakeCheckMinutes: Int = 0, gentleSeconds: Int = 0, now: Date,
+                             objectIDs: [UUID], missions: [MissionStep] = [.photo], wakeCheckMinutes: Int = 0, gentleSeconds: Int = 0, now: Date,
                              using rng: inout some RandomNumberGenerator) -> RingSession {
         let pick = objectIDs.randomElement(using: &rng)
         let phase: Phase
@@ -80,7 +86,7 @@ public struct RingSession: Codable, Equatable {
                            phase: phase, currentObjectID: pick, missesOnCurrent: 0,
                            triedObjectIDs: pick.map { [$0] } ?? [],
                            wakeCheckMinutesStored: wakeCheckMinutes, gentleSecondsStored: gentleSeconds,
-                           missedWakeChecksStored: 0)
+                           missedWakeChecksStored: 0, missionsStored: missions, missionIndexStored: 0)
     }
 
     /// After `missesBeforeSwitch` misses, switches to another available object,
@@ -102,7 +108,7 @@ public struct RingSession: Codable, Equatable {
         triedObjectIDs.append(next)
     }
 
-    public mutating func recordMatch(now: Date) {
+    public mutating func completeMission(now: Date) {
         guard phase == .mission else { return }
         phase = isEarlyClear
             ? .finished

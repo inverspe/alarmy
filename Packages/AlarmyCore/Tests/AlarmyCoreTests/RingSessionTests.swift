@@ -86,14 +86,14 @@ final class RingSessionTests: XCTestCase {
 
     func testMatchStartsCountdown() {
         var s = start([a])
-        s.recordMatch(now: t0)
+        s.completeMission(now: t0)
         XCTAssertEqual(s.phase, .countdown(endsAt: t0 + 600))
         XCTAssertTrue(s.isRinging)
     }
 
     func testTickFinishesAtEnd() {
         var s = start([a])
-        s.recordMatch(now: t0)
+        s.completeMission(now: t0)
         s.tick(now: t0 + 599)
         XCTAssertNotEqual(s.phase, .finished)
         s.tick(now: t0 + 600)
@@ -110,14 +110,14 @@ final class RingSessionTests: XCTestCase {
     func testEarlyClearFinishesOnMatchAndNeverRings() {
         var s = start([a], early: true)
         XCTAssertFalse(s.isRinging)
-        s.recordMatch(now: t0)
+        s.completeMission(now: t0)
         XCTAssertEqual(s.phase, .finished)
         XCTAssertFalse(s.isRinging)
     }
 
     func testCodableRoundTrip() throws {
         var s = start([a, b])
-        s.recordMatch(now: t0)
+        s.completeMission(now: t0)
         let decoded = try JSONDecoder().decode(RingSession.self, from: JSONEncoder().encode(s))
         XCTAssertEqual(decoded, s)
     }

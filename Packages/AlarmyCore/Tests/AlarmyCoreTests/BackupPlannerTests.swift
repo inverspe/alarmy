@@ -20,7 +20,7 @@ final class BackupPlannerTests: XCTestCase {
 
     private func countdown(_ o: Occurrence, endsAt: Date) -> RingSession {
         var s = mission(o)
-        s.recordMatch(now: endsAt - 600)
+        s.completeMission(now: endsAt - 600)
         return s
     }
 
@@ -106,7 +106,7 @@ final class BackupPlannerTests: XCTestCase {
     private func checking(_ o: Occurrence, now: Date, minutes: Int = 5) -> RingSession {
         var s = RingSession.start(occurrence: o.key, ringAfterMinutes: 10, isEarlyClear: false,
                                   objectIDs: [UUID()], wakeCheckMinutes: minutes, now: o.fireDate, using: &g)
-        s.recordMatch(now: now)
+        s.completeMission(now: now)
         return s
     }
 
@@ -163,7 +163,7 @@ final class BackupPlannerTests: XCTestCase {
         var s = RingSession.start(occurrence: o.key, ringAfterMinutes: 60, isEarlyClear: false,
                                   objectIDs: [UUID()], wakeCheckMinutes: 5, now: o.fireDate, using: &g)
         let t = date("2026-10-21 06:31")
-        s.recordMatch(now: t)
+        s.completeMission(now: t)
         let upcoming = [occ(b, "2026-10-22 07:30")]
         let p = BackupPlanner.plan(upcoming: upcoming, completed: [], session: s, now: t)
         XCTAssertLessThanOrEqual(p.count, BackupPlanner.budget)

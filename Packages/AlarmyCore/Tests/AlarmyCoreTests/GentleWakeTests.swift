@@ -48,7 +48,7 @@ final class GentleWakeTests: XCTestCase {
 
     func testRepeatAfterAMissedCheckIsFullVolumeAtOnce() {
         var s = session(gentle: 30)
-        s.recordMatch(now: fire + 60)
+        s.completeMission(now: fire + 60)
         let end = fire + 660, check = end + 300, late = check + 100
         s.tick(now: end)
         s.tick(now: check)

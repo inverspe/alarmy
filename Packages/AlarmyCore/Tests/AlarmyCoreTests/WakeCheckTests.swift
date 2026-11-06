@@ -11,7 +11,7 @@ final class WakeCheckTests: XCTestCase {
     private func ringing(check: Int = 5, objects: [UUID]? = nil, ringAfter: Int = 10) -> RingSession {
         var s = RingSession.start(occurrence: key, ringAfterMinutes: ringAfter, isEarlyClear: false,
                                   objectIDs: objects ?? [a], wakeCheckMinutes: check, now: fire, using: &g)
-        s.recordMatch(now: date("2026-10-21 06:35"))
+        s.completeMission(now: date("2026-10-21 06:35"))
         return s
     }
 
@@ -101,7 +101,7 @@ final class WakeCheckTests: XCTestCase {
         s.tick(now: ringEnd)
         s.tick(now: checkAt)
         s.tick(now: deadline, availableObjectIDs: [a], using: &g)
-        s.recordMatch(now: deadline + 60)
+        s.completeMission(now: deadline + 60)
         let end = deadline + 660
         s.tick(now: end)
         XCTAssertEqual(s.phase, .wakeCheckWaiting(checkAt: end + 300))
@@ -123,7 +123,7 @@ final class WakeCheckTests: XCTestCase {
     func testRingEndingPastTheHardCapSkipsTheCheck() {
         var s = RingSession.start(occurrence: key, ringAfterMinutes: 10, isEarlyClear: false,
                                   objectIDs: [a], wakeCheckMinutes: 5, now: fire, using: &g)
-        s.recordMatch(now: fire + Schedule.hardCap - 60)
+        s.completeMission(now: fire + Schedule.hardCap - 60)
         s.tick(now: fire + Schedule.hardCap + 540)
         XCTAssertEqual(s.phase, .finished)
     }
@@ -131,7 +131,7 @@ final class WakeCheckTests: XCTestCase {
     func testEarlyClearSkipsTheCheck() {
         var s = RingSession.start(occurrence: key, ringAfterMinutes: 10, isEarlyClear: true,
                                   objectIDs: [a], wakeCheckMinutes: 5, now: fire - 600, using: &g)
-        s.recordMatch(now: fire - 300)
+        s.completeMission(now: fire - 300)
         XCTAssertEqual(s.phase, .finished)
     }
 
