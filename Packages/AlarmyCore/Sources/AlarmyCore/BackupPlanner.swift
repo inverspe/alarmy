@@ -31,6 +31,12 @@ public enum BackupPlanner {
     /// With a wake-up check still to come, the budget is shared between the ring now and the repeat later.
     static let ringMaxBeforeCheck = 25
     static let repeatMax = 30
+    public static let appClosedNoticeDelay: TimeInterval = 0
+    public static let appClosedHold: TimeInterval = 0
+
+    public static func wallClockFireDate(_ fireDate: Date, wall: Date, trusted: Date) -> Date {
+        fireDate
+    }
 
     public static func plan(upcoming: [Occurrence], completed: Set<OccurrenceKey>,
                             session: RingSession?, now: Date) -> [PlannedNotification] {
