@@ -51,7 +51,7 @@ struct TypingMissionView: View {
                 .foregroundColor(wrong ? Theme.siren : Theme.night)
                 .padding(.top, 8)
             Spacer(minLength: 8)
-            PrimaryButton(title: "Done", background: Theme.night, foreground: Theme.sunlight) { submit() }
+            PrimaryButton(title: "Check", background: Theme.night, foreground: Theme.sunlight) { submit() }
             EarlyClearExit(session: session)
         }
         .foregroundColor(Theme.night)
@@ -84,6 +84,7 @@ struct TypingMissionView: View {
     private func submit() {
         focused = true
         guard !right else { return }
+        model.noteMissionInput()
         guard Sentences.matches(entry, target) else {
             Haptics.failure()
             wrong = true
@@ -94,7 +95,6 @@ struct TypingMissionView: View {
         wrong = false
         right = true
         Haptics.success()
-        model.noteMissionInput()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             right = false
             entry = ""
@@ -330,7 +330,10 @@ struct BarcodeMissionView: View {
                     }
                     .padding(.bottom, 12)
                 }
-                Button { scanner.torchOn.toggle() } label: {
+                Button {
+                    scanner.torchOn.toggle()
+                    model.noteMissionInput()
+                } label: {
                     Image(systemName: scanner.torchOn ? "flashlight.on.fill" : "flashlight.off.fill")
                         .font(.system(size: 20))
                         .frame(width: 48, height: 48)

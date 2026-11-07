@@ -129,6 +129,7 @@ struct RingingView: View {
                 .font(Theme.bodyStrong)
                 .frame(maxWidth: .infinity, minHeight: 48)
                 .overlay(RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous).stroke(Theme.night, lineWidth: 2))
+                .contentShape(RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous))
         }
         .buttonStyle(.plain)
     }

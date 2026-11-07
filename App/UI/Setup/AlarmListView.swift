@@ -100,7 +100,15 @@ struct AlarmListView: View {
         let ok = model.update { state in
             if let i = state.alarms.firstIndex(where: { $0.id == alarm.id }) { state.alarms[i].isEnabled = enabled }
         }
-        message = ok ? nil : (model.isLocked ? "Alarms can't be changed right now." : "Add at least one object first.")
+        if ok {
+            message = nil
+        } else if model.isLocked {
+            message = "Alarms can't be changed right now."
+        } else if alarm.missions.runnable(barcodes: model.state.barcodes).count != alarm.missions.count {
+            message = "This alarm's barcode is gone. Choose another one first."
+        } else {
+            message = "Add at least one object first."
+        }
     }
 
     private func summary(_ alarm: Alarm) -> String {

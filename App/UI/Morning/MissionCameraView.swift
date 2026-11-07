@@ -65,7 +65,10 @@ struct MissionCameraView: View {
                         .accessibilityLabel("Take photo")
 
                         HStack {
-                            Button { camera.torchOn.toggle() } label: {
+                            Button {
+                                camera.torchOn.toggle()
+                                model.noteMissionInput()
+                            } label: {
                                 Image(systemName: camera.torchOn ? "flashlight.on.fill" : "flashlight.off.fill")
                                     .font(.system(size: 20))
                                     .frame(width: 48, height: 48)

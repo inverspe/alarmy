@@ -7,6 +7,8 @@ public struct VoiceCycle: Equatable {
     public static let repeatDelay: TimeInterval = 30
     /// The sound must never stay away because iOS forgot to say the speech has finished.
     public static let longestSpeech: TimeInterval = 45
+    /// iOS can also fail to start speaking at all, which is much quicker to notice.
+    public static let longestWaitToStart: TimeInterval = 6
 
     public enum Action: Equatable {
         case none
@@ -17,7 +19,7 @@ public struct VoiceCycle: Equatable {
 
     private enum Stage: Equatable {
         case waiting(until: TimeInterval)
-        case speaking(since: TimeInterval)
+        case speaking(since: TimeInterval, started: Bool)
         case paused
     }
 
@@ -39,14 +41,18 @@ public struct VoiceCycle: Equatable {
         switch stage {
         case .waiting(let until) where now >= until:
             announcements += 1
-            stage = .speaking(since: now)
+            stage = .speaking(since: now, started: false)
             return .speak
-        case .speaking(let since) where now - since >= Self.longestSpeech:
+        case .speaking(let since, let started) where now - since >= Self.longestSpeech || started:
             stage = .waiting(until: now + Self.repeatDelay)
             return .gaveUp
         default:
             return .none
         }
+    }
+
+    public mutating func speechStarted() {
+        if case .speaking(let since, _) = stage { stage = .speaking(since: since, started: true) }
     }
 
     public mutating func speechFinished(now: TimeInterval) {

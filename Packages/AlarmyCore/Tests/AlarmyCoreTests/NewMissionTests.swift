@@ -67,6 +67,7 @@ final class NewMissionKindTests: XCTestCase {
 
     func testVoiceIsOnOnlyWithSomethingToSay() {
         XCTAssertFalse(Alarm(hour: 7, minute: 0, voiceLabel: true).voiceIsOn)
+        XCTAssertFalse(Alarm(hour: 7, minute: 0, label: "   ", voiceLabel: true).voiceIsOn)
         XCTAssertTrue(Alarm(hour: 7, minute: 0, label: "Gym", voiceLabel: true).voiceIsOn)
         XCTAssertTrue(Alarm(hour: 7, minute: 0, voiceTime: true).voiceIsOn)
         XCTAssertTrue(Alarm(hour: 7, minute: 0, voiceWeather: true).voiceIsOn)
@@ -287,11 +288,30 @@ final class VoiceCycleTests: XCTestCase {
     func testGivesUpOnSpeechThatNeverFinishes() {
         var cycle = VoiceCycle(now: 0)
         _ = cycle.tick(now: 3)
+        cycle.speechStarted()
         XCTAssertEqual(cycle.tick(now: 47), .none)
         XCTAssertTrue(cycle.holdsSoundBack)
         XCTAssertEqual(cycle.tick(now: 48), .gaveUp)
         XCTAssertFalse(cycle.holdsSoundBack)
         XCTAssertEqual(cycle.tick(now: 78), .speak)
+    }
+
+    /// iOS might never begin, and the alarm shouldn't go quiet for long waiting for it.
+    func testGivesUpQuicklyOnSpeechThatNeverStarts() {
+        var cycle = VoiceCycle(now: 0)
+        _ = cycle.tick(now: 3)
+        XCTAssertEqual(cycle.tick(now: 8.9), .none)
+        XCTAssertEqual(cycle.tick(now: 9), .gaveUp)
+        XCTAssertFalse(cycle.holdsSoundBack)
+        XCTAssertEqual(cycle.tick(now: 39), .speak)
+    }
+
+    func testStartingLateIsIgnoredOnceItHasGivenUp() {
+        var cycle = VoiceCycle(now: 0)
+        _ = cycle.tick(now: 3)
+        _ = cycle.tick(now: 9)
+        cycle.speechStarted()
+        XCTAssertFalse(cycle.holdsSoundBack)
     }
 
     func testAMissionStopsItAndClosingOneWaitsThirtySeconds() {
@@ -338,6 +358,7 @@ final class VoiceScriptTests: XCTestCase {
     func testOnlyWhatWasAskedFor() {
         XCTAssertEqual(VoiceScript.lines(sayTime: false, weather: nil, label: "Gym", first: true, date: morning, timeZone: zone), ["Gym"])
         XCTAssertEqual(VoiceScript.lines(sayTime: false, weather: nil, label: "", first: true, date: morning, timeZone: zone), [])
+        XCTAssertEqual(VoiceScript.lines(sayTime: false, weather: nil, label: "   ", first: true, date: morning, timeZone: zone), [])
     }
 }
 

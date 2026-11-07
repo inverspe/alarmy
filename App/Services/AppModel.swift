@@ -66,6 +66,7 @@ final class AppModel: ObservableObject {
             UIApplication.shared.applicationState == .active && (self?.state.ringSession?.isRinging ?? false)
         }
         notifications.onTap = { [weak self] in self?.tick() }
+        voice.onStarted = { [weak self] in self?.voiceCycle?.speechStarted() }
         voice.onFinished = { [weak self] in
             self?.voiceCycle?.speechFinished(now: Self.monotonic())
             self?.syncAudio()

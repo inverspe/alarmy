@@ -42,6 +42,8 @@ final class LocationFinder: NSObject, CLLocationManagerDelegate {
     var onPlace: (@MainActor (WeatherPlace) -> Void)?
 
     private let manager = CLLocationManager()
+    /// iOS reports the permission at launch too, which isn't a reason to look anything up.
+    private var wanted = false
 
     override init() {
         super.init()
@@ -51,6 +53,7 @@ final class LocationFinder: NSObject, CLLocationManagerDelegate {
 
     /// Only asks permission when `asking`, so the question never comes up over the alarm screens.
     func find(asking: Bool) {
+        wanted = true
         switch manager.authorizationStatus {
         case .notDetermined:
             if asking { manager.requestWhenInUseAuthorization() }
@@ -62,6 +65,7 @@ final class LocationFinder: NSObject, CLLocationManagerDelegate {
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        guard wanted else { return }
         if manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways {
             manager.requestLocation()
         }

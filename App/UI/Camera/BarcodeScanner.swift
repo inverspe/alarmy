@@ -13,8 +13,7 @@ final class BarcodeScanner: NSObject, ObservableObject, AVCaptureMetadataOutputO
     private let queue = DispatchQueue(label: "alarmy.scanner")
     private var device: AVCaptureDevice?
     private var configured = false
-    private var lastCode: String?
-    private var lastScan = Date.distantPast
+    private var lastSeen: [String: Date] = [:]
     #if DEBUG
     private var fakeTimer: Timer?
     private var fakeLeft: [String] = []
@@ -68,17 +67,24 @@ final class BarcodeScanner: NSObject, ObservableObject, AVCaptureMetadataOutputO
     #endif
 
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
-        guard let code = (metadataObjects.first as? AVMetadataMachineReadableCodeObject)?.stringValue else { return }
-        // The camera reports a code many times a second while it can see it.
-        guard code != lastCode || Date().timeIntervalSince(lastScan) >= 2 else { return }
-        lastCode = code
-        lastScan = Date()
-        report(code)
+        // More than one code can be in view, and each is reported many times a second.
+        for object in metadataObjects {
+            guard let code = (object as? AVMetadataMachineReadableCodeObject)?.stringValue,
+                  Date().timeIntervalSince(lastSeen[code] ?? .distantPast) >= 2 else { continue }
+            lastSeen[code] = Date()
+            report(code)
+        }
     }
 
     private func report(_ code: String) {
         Task { @MainActor [weak self] in self?.onScan?(code) }
     }
+
+    /// Only codes: the camera can also report faces and bodies, which aren't what's being looked for.
+    private static let codeTypes: [AVMetadataObject.ObjectType] = [
+        .qr, .ean8, .ean13, .upce, .code39, .code39Mod43, .code93, .code128, .pdf417, .aztec, .dataMatrix, .itf14,
+        .interleaved2of5, .microQR, .microPDF417, .codabar, .gs1DataBar, .gs1DataBarExpanded, .gs1DataBarLimited,
+    ]
 
     private func configureIfNeeded() {
         guard !configured else { return }
@@ -92,7 +98,7 @@ final class BarcodeScanner: NSObject, ObservableObject, AVCaptureMetadataOutputO
         if session.canAddOutput(output) {
             session.addOutput(output)
             output.setMetadataObjectsDelegate(self, queue: .main)
-            output.metadataObjectTypes = output.availableMetadataObjectTypes
+            output.metadataObjectTypes = Self.codeTypes.filter(output.availableMetadataObjectTypes.contains)
         }
         session.commitConfiguration()
         configured = true

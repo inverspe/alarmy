@@ -258,13 +258,13 @@ final class AlarmyUITests: XCTestCase {
         shot("typing")
         entry.tap()
         entry.typeText("x")
-        app.buttons["Done"].tap()
+        app.buttons["Check"].tap()
         expect("Not quite. Check it and try again.")
         shot("typing-wrong")
         XCTAssertEqual(target.label, sentence, "A different sentence after a wrong one")
         entry.typeText(XCUIKeyboardKey.delete.rawValue)
         entry.typeText(sentence)
-        app.buttons["Done"].tap()
+        app.buttons["Check"].tap()
         expect("Mission done ✓", within: 10)
     }
 

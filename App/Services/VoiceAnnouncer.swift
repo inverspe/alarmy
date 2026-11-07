@@ -4,6 +4,7 @@ import NaturalLanguage
 /// Reads lines out with the phone's own speech. `AppModel` decides when, using `VoiceCycle`,
 /// which also brings the sound back if iOS never says the speech has finished.
 final class VoiceAnnouncer: NSObject, AVSpeechSynthesizerDelegate {
+    var onStarted: (@MainActor () -> Void)?
     var onFinished: (@MainActor () -> Void)?
 
     private let synthesizer = AVSpeechSynthesizer()
@@ -42,7 +43,20 @@ final class VoiceAnnouncer: NSObject, AVSpeechSynthesizerDelegate {
         synthesizer.stopSpeaking(at: .immediate)
     }
 
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        Task { @MainActor [weak self] in self?.onStarted?() }
+    }
+
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        lineEnded()
+    }
+
+    /// When iOS cancels a line. Stopping it from here has already set `remaining` to zero.
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        lineEnded()
+    }
+
+    private func lineEnded() {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.remaining > 0 else { return }
             self.remaining -= 1
