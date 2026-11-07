@@ -32,6 +32,11 @@ public enum TrustedClock {
         return ClockAnchor(wall: wall, monotonic: monotonic, bootID: bootID)
     }
 
+    /// False after a reboot, or with no anchor yet: the clock can't be checked against an earlier reading.
+    public static func sameBoot(_ anchor: ClockAnchor?, monotonic: TimeInterval, bootID: String? = nil) -> Bool {
+        true
+    }
+
     /// Nil after a reboot: a different boot session, or (without boot IDs) uptime going backwards.
     /// Uptime alone can't tell: a new boot may already have run longer than the old anchor's uptime.
     private static func derived(_ anchor: ClockAnchor?, monotonic: TimeInterval, bootID: String?) -> Date? {

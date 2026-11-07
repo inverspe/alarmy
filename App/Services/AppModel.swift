@@ -180,6 +180,7 @@ final class AppModel: ObservableObject {
         let t = TrustedClock.now(wall: wall, monotonic: monotonic, bootID: bootID, anchor: state.clockAnchor)
         now = t
         var s = state
+        s.dropStaleUnlock(now: t, sameBoot: TrustedClock.sameBoot(s.clockAnchor, monotonic: monotonic, bootID: bootID))
 
         // Re-anchor at most once a minute (so state isn't rewritten every second),
         // but immediately after a reboot.
@@ -190,8 +191,16 @@ final class AppModel: ObservableObject {
             s.clockAnchor = anchor
         }
 
-        // An early clear or unlock that wasn't finished in time makes way for the real alarm.
+        // An early clear or unlock that wasn't finished in time makes way for the real alarm,
+        // which starts from its ringing screen with nothing carried over.
+        let hadSession = s.ringSession != nil
         s.yieldToDueAlarm(now: t, calendar: calendar)
+        if hadSession && s.ringSession == nil {
+            DiagnosticLog.shared.add("early clear or unlock gave way to an alarm")
+            closeMission()
+            missionTimedOut = false
+            stuck = MissionStuckTracker()
+        }
 
         if s.ringSession == nil,
            let due = Schedule.activeOccurrence(s.alarms, completed: s.completed, now: t, calendar: calendar) {
@@ -278,9 +287,11 @@ final class AppModel: ObservableObject {
     func startUnlock() {
         guard let occurrence = unlockable else { return }
         var s = state
+        let objectIDs = usableObjectIDs(in: s)
         s.ringSession = RingSession.start(occurrence: occurrence.key, ringAfterMinutes: occurrence.alarm.ringAfterMinutes,
-                                          isEarlyClear: true, isUnlock: true, objectIDs: usableObjectIDs(in: s),
-                                          missions: occurrence.alarm.missions.runnable(barcodes: s.barcodes),
+                                          isEarlyClear: true, isUnlock: true, objectIDs: objectIDs,
+                                          missions: EditLock.unlockMissions(occurrence.alarm.missions.runnable(barcodes: s.barcodes),
+                                                                            hasObjects: !objectIDs.isEmpty),
                                           now: trustedNow(), using: &rng)
         DiagnosticLog.shared.add("unlock started")
         commit(s)
@@ -426,7 +437,7 @@ final class AppModel: ObservableObject {
         guard let session = state.ringSession, session.currentMission?.kind == .photo, let object = currentObject else { return nil }
         noteMissionInput()
         let references = object.referencePhotoIDs.compactMap { photos.featurePrint($0) }
-        let misses = state.photoMisses
+        let misses = state.photoMissCount(for: session)
         let matcher = self.matcher
         let evaluation = await Task.detached { () -> PhotoMatcher.MatchResult in
             guard let cg = image.normalized(maxSide: 1280).cgImage,
@@ -440,13 +451,16 @@ final class AppModel: ObservableObject {
                                         object.name, evaluation.matched ? "match" : "miss", evaluation.distance,
                                         evaluation.limit, misses))
 
-        // The session may have moved on while matching (e.g. fire time passed for an early clear).
-        guard var current = state.ringSession, current.occurrence == session.occurrence, current.currentMission?.kind == .photo else {
+        // The session may have moved on while matching (e.g. fire time passed for an early clear,
+        // and the real ring for the same alarm started). A photo for one never counts for the other.
+        guard var current = state.ringSession, current.occurrence == session.occurrence,
+              current.isEarlyClear == session.isEarlyClear, current.isUnlock == session.isUnlock,
+              current.currentMission?.kind == .photo else {
             return nil
         }
         var s = state
+        s.recordPhoto(matched: evaluation.matched, in: &current)
         if evaluation.matched {
-            s.photoMisses = 0
             current.completeMission(now: trustedNow())
             s.ringSession = current
             commit(s)
@@ -454,7 +468,6 @@ final class AppModel: ObservableObject {
             return .matched
         }
         let before = current.currentObjectID
-        s.photoMisses += 1
         current.recordMiss(availableObjectIDs: usableObjectIDs(in: s), using: &rng)
         s.ringSession = current
         commit(s)

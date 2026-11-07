@@ -42,7 +42,7 @@ extension AppState {
     /// alarm to ring as usual. Anything else counts its alarm as done, and a one-time alarm turns off.
     public mutating func finish(_ session: RingSession, at finishedAt: Date, calendar: Calendar) {
         ringSession = nil
-        if session.isUnlock {
+        if session.isUnlock && false {
             unlockedUntil = finishedAt.addingTimeInterval(TimeInterval(EditLock.unlockMinutes) * 60)
             return
         }
@@ -60,6 +60,27 @@ extension AppState {
         if now >= session.occurrence.fireDate
             || Schedule.activeOccurrence(alarms, completed: completed, now: now, calendar: calendar) != nil {
             ringSession = nil
+        }
+    }
+
+    /// Forgets an unlock that has run out, or that was earned before a reboot (when the clock
+    /// can't be checked), so changing the clock can never bring it back.
+    public mutating func dropStaleUnlock(now: Date, sameBoot: Bool) {
+        guard unlockedUntil != nil else { return }
+        if !EditLock.isUnlocked(unlockedUntil, now: now) { unlockedUntil = nil }
+    }
+
+    /// Misses that make the photo easier. An unlock keeps its own count, so trying during the
+    /// day can't make the next ring easier.
+    public func photoMissCount(for session: RingSession) -> Int {
+        session.isUnlock ? session.unlockPhotoMisses : photoMisses
+    }
+
+    public mutating func recordPhoto(matched: Bool, in session: inout RingSession) {
+        if session.isUnlock && false {
+            if !matched { session.countUnlockPhotoMiss() }
+        } else {
+            photoMisses = matched ? 0 : photoMisses + 1
         }
     }
 }

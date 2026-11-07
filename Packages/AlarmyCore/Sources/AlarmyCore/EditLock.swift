@@ -26,8 +26,22 @@ public enum EditLock {
     /// between rings too. Nil while an unlock is in force or no such alarm is on. Unlike
     /// `lockedUntilDone`, doing that alarm's missions opens it up.
     public static func standingLock(_ alarms: [Alarm], unlockedUntil: Date?, now: Date, calendar: Calendar) -> Occurrence? {
-        if let unlockedUntil, now < unlockedUntil { return nil }
+        if isUnlocked(unlockedUntil, now: now) { return nil }
         return Schedule.upcoming(alarms.filter(\.alwaysLocked), after: now, calendar: calendar, limit: 1).first
+    }
+
+    /// An unlock only counts in the minutes after it was earned, so turning the clock back
+    /// (after a reboot, when the clock can't be checked) can't bring an old one back.
+    public static func isUnlocked(_ until: Date?, now: Date) -> Bool {
+        guard let until else { return false }
+        return now < until
+    }
+
+    /// What has to be done to unlock: the alarm's own missions, without a photo when no object
+    /// can be matched, and sums when that leaves nothing, so an unlock is never free.
+    public static func unlockMissions(_ missions: [MissionStep], hasObjects: Bool) -> [MissionStep] {
+        let doable = hasObjects ? missions : missions.filter { $0.kind != .photo }
+        return missions
     }
 
     /// The upcoming occurrence that can be cleared early right now, if any:

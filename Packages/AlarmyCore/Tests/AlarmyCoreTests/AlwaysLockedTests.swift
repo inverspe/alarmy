@@ -61,6 +61,66 @@ final class AlwaysLockedTests: XCTestCase {
         XCTAssertEqual(EditLock.unlockMinutes, 10)
     }
 
+    func testClockTurnedBackCannotBringBackAnUnlock() {
+        let alarm = locked()
+        // Earned at 12:00, good until 12:10. Turning the clock back before 12:00 doesn't reopen it.
+        XCTAssertNotNil(standing([alarm], now: "2026-10-21 11:59", unlockedUntil: "2026-10-21 12:10"))
+        XCTAssertNotNil(standing([alarm], now: "2026-10-01 12:05", unlockedUntil: "2026-10-21 12:10"))
+        XCTAssertNil(standing([alarm], now: "2026-10-21 12:00", unlockedUntil: "2026-10-21 12:10"))
+    }
+
+    func testRunOutOrRebootedUnlockIsForgotten() {
+        var state = AppState()
+        state.unlockedUntil = date("2026-10-21 12:10")
+        state.dropStaleUnlock(now: date("2026-10-21 12:05"), sameBoot: true)
+        XCTAssertEqual(state.unlockedUntil, date("2026-10-21 12:10"), "Still good")
+
+        state.dropStaleUnlock(now: date("2026-10-21 12:05"), sameBoot: false)
+        XCTAssertNil(state.unlockedUntil, "After a reboot the clock can't be checked")
+
+        state.unlockedUntil = date("2026-10-21 12:10")
+        state.dropStaleUnlock(now: date("2026-10-21 12:10"), sameBoot: true)
+        XCTAssertNil(state.unlockedUntil, "Run out")
+    }
+
+    func testSameBootNeedsAnEarlierReading() {
+        let anchor = ClockAnchor(wall: date("2026-10-21 12:00"), monotonic: 1000, bootID: "a")
+        XCTAssertTrue(TrustedClock.sameBoot(anchor, monotonic: 1600, bootID: "a"))
+        XCTAssertFalse(TrustedClock.sameBoot(anchor, monotonic: 1600, bootID: "b"))
+        XCTAssertFalse(TrustedClock.sameBoot(nil, monotonic: 1600, bootID: "a"))
+    }
+
+    func testUnlockIsNeverFree() {
+        let sums = MissionStep(kind: .math)
+        XCTAssertEqual(EditLock.unlockMissions([MissionStep.photo], hasObjects: true), [MissionStep.photo])
+        XCTAssertEqual(EditLock.unlockMissions([MissionStep.photo], hasObjects: false), [sums])
+        XCTAssertEqual(EditLock.unlockMissions([MissionStep.photo, MissionStep(kind: .steps)], hasObjects: false), [MissionStep(kind: .steps)])
+        XCTAssertEqual(EditLock.unlockMissions([], hasObjects: true), [sums])
+    }
+
+    func testPhotosDuringAnUnlockDontMakeTheRingEasier() {
+        let occurrence = Occurrence(alarm: locked(), fireDate: date("2026-10-22 06:30"))
+        var state = AppState()
+        state.photoMisses = 2
+        var unlock = unlockSession(for: occurrence, at: "2026-10-21 12:00")
+        XCTAssertEqual(state.photoMissCount(for: unlock), 0)
+        for _ in 0..<3 { state.recordPhoto(matched: false, in: &unlock) }
+        XCTAssertEqual(state.photoMisses, 2, "The alarm's own count is untouched")
+        XCTAssertEqual(unlock.unlockPhotoMisses, 3)
+        XCTAssertEqual(state.photoMissCount(for: unlock), 3, "The unlock still gets easier as it goes")
+        state.recordPhoto(matched: true, in: &unlock)
+        XCTAssertEqual(state.photoMisses, 2)
+
+        var g = SeededGenerator(seed: 1)
+        var ring = RingSession.start(occurrence: occurrence.key, ringAfterMinutes: 10, isEarlyClear: false,
+                                     objectIDs: [], missions: [.photo], now: date("2026-10-22 06:30"), using: &g)
+        XCTAssertEqual(state.photoMissCount(for: ring), 2)
+        state.recordPhoto(matched: false, in: &ring)
+        XCTAssertEqual(state.photoMisses, 3)
+        state.recordPhoto(matched: true, in: &ring)
+        XCTAssertEqual(state.photoMisses, 0)
+    }
+
     // MARK: The unlock session
 
     func testUnlockRingsNothingAndCanBeBackedOutOf() {

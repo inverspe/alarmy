@@ -40,10 +40,18 @@ public struct RingSession: Codable, Equatable {
     private var snoozeLimitStored: Int?
     private var snoozeCountStored: Int?
     private var unlockStored: Bool?
+    private var unlockPhotoMissesStored: Int?
 
     /// Doing the missions of an alarm that can't be turned off, to open up changes.
     /// The alarm itself still rings as usual.
     public var isUnlock: Bool { unlockStored ?? false }
+
+    /// Photos that didn't match during this unlock. Kept apart from the alarm's own count.
+    public var unlockPhotoMisses: Int { unlockPhotoMissesStored ?? 0 }
+
+    public mutating func countUnlockPhotoMiss() {
+        unlockPhotoMissesStored = unlockPhotoMisses + 1
+    }
 
     public var isRinging: Bool {
         guard !isEarlyClear else { return false }
