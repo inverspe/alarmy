@@ -44,7 +44,7 @@ final class MissionSensor: ObservableObject {
         case .steps: startSteps()
         case .squats: startSquats()
         case .shake: startShake(level: step.level)
-        case .photo, .math: break
+        case .photo, .math, .typing, .barcode, .memory: break
         }
     }
 
