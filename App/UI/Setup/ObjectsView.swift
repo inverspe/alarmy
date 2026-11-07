@@ -14,10 +14,7 @@ struct ObjectsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ScreenHeader(title: "Objects")
 
-                if let holder = model.lockHolder {
-                    LockBanner(text: "Locked until your \(Theme.timeString(holder.fireDate)) alarm is done")
-                        .padding(.bottom, 14)
-                }
+                LockNotice()
 
                 Text("Pick things that don't move, in rooms away from your bed. One is chosen at random each morning.")
                     .font(Theme.caption)

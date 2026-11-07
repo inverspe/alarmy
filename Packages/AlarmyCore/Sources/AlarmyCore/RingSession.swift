@@ -22,7 +22,8 @@ public struct RingSession: Codable, Equatable {
 
     public let occurrence: OccurrenceKey
     public let ringAfterMinutes: Int
-    /// Cleared before the alarm: nothing rings and a match finishes immediately.
+    /// Before the alarm: nothing rings, it can be backed out of, and the last mission finishes it.
+    /// True for unlocks too.
     public let isEarlyClear: Bool
     public private(set) var phase: Phase
     public private(set) var currentObjectID: UUID?
@@ -38,6 +39,11 @@ public struct RingSession: Codable, Equatable {
     private var snoozeMinutesStored: Int?
     private var snoozeLimitStored: Int?
     private var snoozeCountStored: Int?
+    private var unlockStored: Bool?
+
+    /// Doing the missions of an alarm that can't be turned off, to open up changes.
+    /// The alarm itself still rings as usual.
+    public var isUnlock: Bool { unlockStored ?? false }
 
     public var isRinging: Bool {
         guard !isEarlyClear else { return false }
@@ -117,10 +123,12 @@ public struct RingSession: Codable, Equatable {
 
     /// A photo mission with no usable objects is dropped. With no missions left it rings
     /// for the countdown and then stops, so it can never ring forever.
-    public static func start(occurrence: OccurrenceKey, ringAfterMinutes: Int, isEarlyClear: Bool,
+    /// An unlock is always a session before the alarm, like an early clear.
+    public static func start(occurrence: OccurrenceKey, ringAfterMinutes: Int, isEarlyClear: Bool, isUnlock: Bool = false,
                              objectIDs: [UUID], missions: [MissionStep] = [.photo], wakeCheckMinutes: Int = 0, gentleSeconds: Int = 0,
                              snoozeMinutes: Int = 0, snoozeLimit: Int = -1, now: Date,
                              using rng: inout some RandomNumberGenerator) -> RingSession {
+        let isEarlyClear = isEarlyClear || isUnlock
         let wantsPhoto = missions.contains { $0.kind == .photo }
         let pick = wantsPhoto ? objectIDs.randomElement(using: &rng) : nil
         let missions = pick == nil ? missions.filter { $0.kind != .photo } : missions
@@ -137,7 +145,8 @@ public struct RingSession: Codable, Equatable {
                            triedObjectIDs: pick.map { [$0] } ?? [],
                            wakeCheckMinutesStored: wakeCheckMinutes, gentleSecondsStored: gentleSeconds,
                            missedWakeChecksStored: 0, missionsStored: missions, missionIndexStored: 0,
-                           snoozeMinutesStored: snoozeMinutes, snoozeLimitStored: snoozeLimit, snoozeCountStored: 0)
+                           snoozeMinutesStored: snoozeMinutes, snoozeLimitStored: snoozeLimit, snoozeCountStored: 0,
+                           unlockStored: isUnlock ? true : nil)
     }
 
     /// After `missesBeforeSwitch` misses, switches to another available object,

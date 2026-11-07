@@ -91,10 +91,11 @@ struct PrimaryButton: View {
 
 struct LockBanner: View {
     let text: String
+    var symbol = "lock.fill"
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "lock.fill")
+            Image(systemName: symbol)
             Text(text)
         }
         .font(.system(size: 14, weight: .semibold))

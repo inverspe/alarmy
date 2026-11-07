@@ -136,7 +136,9 @@ struct RingingView: View {
 
     @ViewBuilder
     private func photoHeading(_ object: RegisteredObject?) -> some View {
-        Text(session.isEarlyClear
+        Text(session.isUnlock
+             ? "To unlock your alarms, go find"
+             : session.isEarlyClear
              ? "To clear your \(Theme.timeString(session.occurrence.fireDate)) alarm, go find"
              : "Go find")
             .font(.system(size: 17, weight: .medium))
@@ -151,7 +153,9 @@ struct RingingView: View {
 
     @ViewBuilder
     private func missionHeading(_ object: RegisteredObject?) -> some View {
-        Text(session.isEarlyClear
+        Text(session.isUnlock
+             ? "To unlock your alarms"
+             : session.isEarlyClear
              ? "To clear your \(Theme.timeString(session.occurrence.fireDate)) alarm"
              : "Your mission")
             .font(.system(size: 17, weight: .medium))

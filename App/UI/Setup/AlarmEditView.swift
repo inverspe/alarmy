@@ -22,10 +22,7 @@ struct AlarmEditView: View {
                     Button("Cancel") { dismiss() }.foregroundColor(Theme.dusk)
                 }
 
-                if let holder = model.lockHolder {
-                    LockBanner(text: "Locked until your \(Theme.timeString(holder.fireDate)) alarm is done")
-                        .padding(.bottom, 8)
-                }
+                LockNotice(offersUnlock: false)
 
                 Group {
                     DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
@@ -129,6 +126,14 @@ struct AlarmEditView: View {
 
                     stepperField("Lock edits before alarm", value: $alarm.lockHours, range: 0...12, step: 1) { $0 == 0 ? "Off" : "\($0) h" }
                     stepperField("Clear early window", value: $alarm.earlyClearMinutes, range: 0...60, step: 5) { $0 == 0 ? "Off" : "\($0) min" }
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        toggleField("Can't turn off", isOn: $alarm.alwaysLocked)
+                        Text(alwaysLockedNote)
+                            .font(Theme.caption)
+                            .foregroundColor(Theme.dusk)
+                            .padding(.vertical, 8)
+                    }
                 }
                 .disabled(model.isLocked)
 
@@ -154,6 +159,14 @@ struct AlarmEditView: View {
             .padding(.bottom, 32)
         }
         .background(Theme.night.ignoresSafeArea())
+    }
+
+    private var alwaysLockedNote: String {
+        let window = alarm.lockHours > 0
+            ? " In the \(alarm.lockHours) h before it rings, not even that works."
+            : ""
+        return "Once saved, everything stays locked. To turn this alarm off, change or delete it, "
+            + "or change anything else, do its missions first. That opens everything for \(EditLock.unlockMinutes) minutes." + window
     }
 
     private func gentleLabel(_ seconds: Int) -> String {

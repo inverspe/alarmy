@@ -32,10 +32,7 @@ struct AlarmListView: View {
                     .accessibilityLabel("Add alarm")
                 }
 
-                if let holder = model.lockHolder {
-                    LockBanner(text: "Locked until your \(Theme.timeString(holder.fireDate)) alarm is done")
-                        .padding(.bottom, 8)
-                }
+                LockNotice()
 
                 if alarms.isEmpty {
                     Text("No alarms yet. Tap + to add one.")
@@ -91,6 +88,7 @@ struct AlarmListView: View {
             .labelsHidden()
             .tint(Theme.horizon)
             .disabled(model.isLocked)
+            .accessibilityIdentifier("alarm-switch")
         }
         .padding(.vertical, 16)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.divider).frame(height: 1) }
@@ -113,6 +111,7 @@ struct AlarmListView: View {
 
     private func summary(_ alarm: Alarm) -> String {
         (alarm.label.isEmpty ? "" : "\(alarm.label). ") + "\(RepeatText.describe(alarm.repeatDays)), rings \(alarm.ringAfterMinutes) min after the mission"
+            + (alarm.alwaysLocked ? ". Can't turn off" : "")
     }
 }
 

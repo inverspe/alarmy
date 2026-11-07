@@ -42,6 +42,8 @@ public struct Alarm: Codable, Identifiable, Equatable {
     public var voiceTime: Bool
     public var voiceLabel: Bool
     public var voiceWeather: Bool
+    /// Locked all the time, not just before it rings. Doing its missions opens everything up for a while.
+    public var alwaysLocked: Bool
 
     public static let snoozeMinuteChoices = [1, 3, 5, 10, 15, 20, 25, 30, 45, 60]
     public static let snoozeLimitChoices = [-1, 1, 2, 3, 5, 10]
@@ -54,7 +56,7 @@ public struct Alarm: Codable, Identifiable, Equatable {
                 lockHours: Int = 8, earlyClearMinutes: Int = 30, gentleSeconds: Int = 0, wakeCheckMinutes: Int = 0, missions: [MissionStep] = [.photo],
                 vibrate: Bool = true, quietDuringMissions: Bool = true, label: String = "",
                 snoozeOn: Bool = false, snoozeMinutes: Int = 5, snoozeLimit: Int = 3,
-                voiceTime: Bool = false, voiceLabel: Bool = false, voiceWeather: Bool = false) {
+                voiceTime: Bool = false, voiceLabel: Bool = false, voiceWeather: Bool = false, alwaysLocked: Bool = false) {
         self.id = id
         self.hour = hour
         self.minute = minute
@@ -76,12 +78,13 @@ public struct Alarm: Codable, Identifiable, Equatable {
         self.voiceTime = voiceTime
         self.voiceLabel = voiceLabel
         self.voiceWeather = voiceWeather
+        self.alwaysLocked = alwaysLocked
     }
 
     enum CodingKeys: String, CodingKey {
         case id, hour, minute, repeatDays, isEnabled, sound, ringAfterMinutes, lockHours, earlyClearMinutes
         case gentleSeconds, wakeCheckMinutes, missions, vibrate, quietDuringMissions
-        case label, snoozeOn, snoozeMinutes, snoozeLimit, voiceTime, voiceLabel, voiceWeather
+        case label, snoozeOn, snoozeMinutes, snoozeLimit, voiceTime, voiceLabel, voiceWeather, alwaysLocked
     }
 
     /// Missing fields fall back to defaults, so a state file from an older build still loads.
@@ -108,6 +111,7 @@ public struct Alarm: Codable, Identifiable, Equatable {
         voiceTime = try c.decodeIfPresent(Bool.self, forKey: .voiceTime) ?? false
         voiceLabel = try c.decodeIfPresent(Bool.self, forKey: .voiceLabel) ?? false
         voiceWeather = try c.decodeIfPresent(Bool.self, forKey: .voiceWeather) ?? false
+        alwaysLocked = try c.decodeIfPresent(Bool.self, forKey: .alwaysLocked) ?? false
     }
 }
 
@@ -176,11 +180,14 @@ public struct AppState: Codable, Equatable {
     public var ringSession: RingSession? = nil
     public var onboardingDone = false
     public var clockAnchor: ClockAnchor? = nil
+    /// Alarms that can't be turned off stay open for changes until then, after their missions were done.
+    public var unlockedUntil: Date? = nil
 
     public init() {}
 
     enum CodingKeys: String, CodingKey {
         case alarms, objects, photoMisses, barcodes, customSentences, missionTimeLimit, weatherPlace, completed, ringSession, onboardingDone, clockAnchor
+        case unlockedUntil
     }
 
     /// Missing fields fall back to defaults, and an unreadable session or clock anchor is
@@ -198,5 +205,6 @@ public struct AppState: Codable, Equatable {
         ringSession = try? c.decodeIfPresent(RingSession.self, forKey: .ringSession)
         onboardingDone = try c.decodeIfPresent(Bool.self, forKey: .onboardingDone) ?? false
         clockAnchor = try? c.decodeIfPresent(ClockAnchor.self, forKey: .clockAnchor)
+        unlockedUntil = try? c.decodeIfPresent(Date.self, forKey: .unlockedUntil)
     }
 }

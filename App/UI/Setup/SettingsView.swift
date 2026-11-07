@@ -16,10 +16,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ScreenHeader(title: "Settings")
 
-                if let holder = model.lockHolder {
-                    LockBanner(text: "Locked until your \(Theme.timeString(holder.fireDate)) alarm is done")
-                        .padding(.bottom, 14)
-                }
+                LockNotice()
 
                 HStack {
                     Text("Mission time limit").font(Theme.body).foregroundColor(Theme.moon)

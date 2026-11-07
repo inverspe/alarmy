@@ -19,6 +19,17 @@ public enum EditLock {
             }
     }
 
+    /// How long everything stays open after the missions of an alarm that can't be turned off.
+    public static let unlockMinutes = 10
+
+    /// The next occurrence of an alarm that can't be turned off, which keeps everything locked
+    /// between rings too. Nil while an unlock is in force or no such alarm is on. Unlike
+    /// `lockedUntilDone`, doing that alarm's missions opens it up.
+    public static func standingLock(_ alarms: [Alarm], unlockedUntil: Date?, now: Date, calendar: Calendar) -> Occurrence? {
+        if let unlockedUntil, now < unlockedUntil { return nil }
+        return Schedule.upcoming(alarms.filter { _ in false }, after: now, calendar: calendar, limit: 1).first
+    }
+
     /// The upcoming occurrence that can be cleared early right now, if any:
     /// `now` is within `earlyClearMinutes` before it fires and it isn't completed.
     public static func earlyClearable(_ alarms: [Alarm], completed: [OccurrenceKey: Date],

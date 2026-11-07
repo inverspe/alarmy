@@ -11,10 +11,11 @@ final class AlarmyUITests: XCTestCase {
 
     private func launch(ring: String? = "now", missions: String = "photo", sensor: String = "count",
                         wakeCheck: Int = 0, ringAfter: Int = 1, gentle: Int = 0, twoFinger: Bool = false,
-                        snooze: String? = nil, voice: Bool = false, scans: String? = nil) {
+                        snooze: String? = nil, voice: Bool = false, scans: String? = nil, alwaysLocked: Bool = false) {
         app = XCUIApplication()
         var environment = ["ALARMY_UITEST_SENSOR": sensor]
         if twoFinger { environment["ALARMY_UITEST_TWO_FINGER"] = "1" }
+        if alwaysLocked { environment["ALARMY_UITEST_ALWAYS_LOCKED"] = "1" }
         if let snooze { environment["ALARMY_UITEST_SNOOZE"] = snooze }
         if voice { environment["ALARMY_UITEST_VOICE"] = "1" }
         if let scans { environment["ALARMY_UITEST_SCANS"] = scans }
@@ -441,6 +442,46 @@ final class AlarmyUITests: XCTestCase {
         XCTAssertFalse(clear.exists, "Could clear the same alarm twice")
     }
 
+    func testAlarmThatCantBeTurnedOffUnlocksWithItsMission() {
+        launch(ring: "later", missions: "math:1", alwaysLocked: true)
+        let toggle = app.switches["alarm-switch"].firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        let notice = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'can' AND label CONTAINS 'be turned off. Do its missions to unlock.'")).firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 5), "No lock notice")
+        XCTAssertFalse(toggle.isEnabled, "Could turn off an alarm that can't be turned off")
+        XCTAssertFalse(app.buttons["Add alarm"].isEnabled)
+        shot("cant-turn-off-locked")
+
+        // Backing out changes nothing.
+        let unlock = app.buttons["Unlock with mission"]
+        XCTAssertTrue(unlock.exists)
+        unlock.tap()
+        expect("To unlock your alarms")
+        startMission()
+        expect("Sum 1 of 1")
+        shot("cant-turn-off-mission")
+        app.buttons["Not now"].tap()
+        XCTAssertTrue(unlock.waitForExistence(timeout: 5))
+        XCTAssertFalse(toggle.isEnabled)
+
+        // Doing it opens everything up.
+        unlock.tap()
+        startMission()
+        answerSum()
+        let unlocked = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Unlocked until'")).firstMatch
+        XCTAssertTrue(unlocked.waitForExistence(timeout: 10), "Never unlocked")
+        XCTAssertTrue(toggle.isEnabled, "Still locked after the mission")
+        XCTAssertFalse(unlock.exists)
+        shot("cant-turn-off-unlocked")
+
+        toggle.tap()
+        XCTAssertEqual(toggle.value as? String, "0", "Couldn't turn it off once unlocked")
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: unlocked)
+        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 5), .completed, "Nothing is locked once it's off")
+        XCTAssertFalse(notice.exists)
+        shot("cant-turn-off-off")
+    }
+
     func testMissionListEditor() {
         launch(ring: "later")
         let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'rings'")).firstMatch
@@ -467,6 +508,8 @@ final class AlarmyUITests: XCTestCase {
         XCTAssertTrue(app.switches["Snooze"].exists, "No snooze setting")
         XCTAssertTrue(app.switches["Say the time"].exists, "No voice setting")
         XCTAssertTrue(app.switches["Say the weather"].exists, "No weather setting")
+        XCTAssertTrue(app.switches["Can't turn off"].exists, "No can't-turn-off setting")
+        XCTAssertEqual(app.switches["Can't turn off"].value as? String, "0", "Should be off unless chosen")
 
         let stepsAmount = app.steppers["50 steps"]
         scrollTo(stepsAmount)

@@ -36,7 +36,8 @@ enum UITestHarness {
                               label: environment["ALARMY_UITEST_VOICE"] == nil ? "" : "Test label",
                               snoozeOn: environment["ALARMY_UITEST_SNOOZE"] != nil,
                               snoozeMinutes: snooze.first ?? 5, snoozeLimit: snooze.last ?? 3,
-                              voiceTime: environment["ALARMY_UITEST_VOICE"] != nil, voiceLabel: environment["ALARMY_UITEST_VOICE"] != nil)]
+                              voiceTime: environment["ALARMY_UITEST_VOICE"] != nil, voiceLabel: environment["ALARMY_UITEST_VOICE"] != nil,
+                              alwaysLocked: environment["ALARMY_UITEST_ALWAYS_LOCKED"] != nil)]
         try? StateStore(fileURL: support.appendingPathComponent("state.json")).save(state)
     }
 

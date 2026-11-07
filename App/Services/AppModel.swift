@@ -115,12 +115,33 @@ final class AppModel: ObservableObject {
         return Occurrence(alarm: alarm, fireDate: session.occurrence.fireDate)
     }
 
-    var lockHolder: Occurrence? {
+    /// Locked from shortly before an alarm until it's done. Nothing opens this one.
+    var untilDoneLock: Occurrence? {
         EditLock.lockedUntilDone(state.alarms, completed: state.completed, session: sessionOccurrence,
                                  now: now, calendar: calendar)
     }
 
+    /// Locked because an alarm can't be turned off. Doing its missions opens it.
+    var standingLock: Occurrence? {
+        EditLock.standingLock(state.alarms, unlockedUntil: state.unlockedUntil, now: now, calendar: calendar)
+    }
+
+    var lockHolder: Occurrence? { untilDoneLock ?? standingLock }
+
     var isLocked: Bool { lockHolder != nil }
+
+    /// The alarm whose missions would open things up right now, if that's the only lock.
+    var unlockable: Occurrence? {
+        guard state.ringSession == nil, untilDoneLock == nil else { return nil }
+        return standingLock
+    }
+
+    /// When an unlock that's in force runs out, if an alarm that can't be turned off is waiting on it.
+    var unlockedUntil: Date? {
+        guard let until = state.unlockedUntil, now < until, !isLocked,
+              state.alarms.contains(where: { $0.isEnabled && $0.alwaysLocked }) else { return nil }
+        return until
+    }
 
     var earlyClearable: Occurrence? {
         guard state.ringSession == nil else { return nil }
@@ -169,10 +190,8 @@ final class AppModel: ObservableObject {
             s.clockAnchor = anchor
         }
 
-        // An early clear that wasn't finished by fire time turns into the real alarm.
-        if let session = s.ringSession, session.isEarlyClear, t >= session.occurrence.fireDate {
-            s.ringSession = nil
-        }
+        // An early clear or unlock that wasn't finished in time makes way for the real alarm.
+        s.yieldToDueAlarm(now: t, calendar: calendar)
 
         if s.ringSession == nil,
            let due = Schedule.activeOccurrence(s.alarms, completed: s.completed, now: t, calendar: calendar) {
@@ -254,7 +273,21 @@ final class AppModel: ObservableObject {
         tick()
     }
 
-    /// Backing out of an early clear is fine: nothing is ringing yet.
+    /// Does the missions of the alarm that can't be turned off, to open everything up for a while.
+    /// Nothing rings, and the alarm itself still rings as usual afterwards.
+    func startUnlock() {
+        guard let occurrence = unlockable else { return }
+        var s = state
+        s.ringSession = RingSession.start(occurrence: occurrence.key, ringAfterMinutes: occurrence.alarm.ringAfterMinutes,
+                                          isEarlyClear: true, isUnlock: true, objectIDs: usableObjectIDs(in: s),
+                                          missions: occurrence.alarm.missions.runnable(barcodes: s.barcodes),
+                                          now: trustedNow(), using: &rng)
+        DiagnosticLog.shared.add("unlock started")
+        commit(s)
+        tick()
+    }
+
+    /// Backing out of an early clear or unlock is fine: nothing is ringing yet.
     func cancelEarlyClear() {
         guard let session = state.ringSession, session.isEarlyClear else { return }
         closeMission()
@@ -480,12 +513,8 @@ final class AppModel: ObservableObject {
 
     private func finish(_ session: RingSession, in s: inout AppState, at t: Date) {
         stuck = MissionStuckTracker()
-        s.completed = Completion.markFinished(session.occurrence, at: t, alarms: s.alarms,
-                                              completed: s.completed, calendar: calendar)
-        if let i = s.alarms.firstIndex(where: { $0.id == session.occurrence.alarmID }), s.alarms[i].repeatDays.isEmpty {
-            s.alarms[i].isEnabled = false
-        }
-        s.ringSession = nil
+        if session.isUnlock { DiagnosticLog.shared.add("unlocked for \(EditLock.unlockMinutes) min") }
+        s.finish(session, at: t, calendar: calendar)
     }
 
     private func usableObjectIDs(in s: AppState) -> [UUID] {
