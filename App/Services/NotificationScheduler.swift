@@ -1,7 +1,8 @@
 import UserNotifications
 import AlarmyCore
 
-/// Schedules the critical-alert backups and routes notification taps back to the app.
+/// Schedules the backups and routes notification taps back to the app. They're critical
+/// alerts where iOS allows it, and otherwise Time Sensitive, so they still get through Focus.
 final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
     private let center = UNUserNotificationCenter.current()
     private var lastApplied: [String] = []
@@ -49,7 +50,7 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
         @unknown default: status = "unknown"
         }
         criticalEnabled = s.criticalAlertSetting == .enabled
-        DiagnosticLog.shared.add("notifications \(context): status=\(status) alert=\(name(s.alertSetting)) sound=\(name(s.soundSetting)) critical=\(name(s.criticalAlertSetting))")
+        DiagnosticLog.shared.add("notifications \(context): status=\(status) alert=\(name(s.alertSetting)) sound=\(name(s.soundSetting)) critical=\(name(s.criticalAlertSetting)) timeSensitive=\(name(s.timeSensitiveSetting))")
     }
 
     /// Replaces every pending request with `plan`. No-op when the plan hasn't changed.
@@ -77,7 +78,7 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
                 content.title = BackupCopy.title(at: index)
                 content.body = "Open Alarmy to do your mission."
             }
-            content.interruptionLevel = item.kind == .nudge ? .active : .critical
+            content.interruptionLevel = level(item.kind.urgency(criticalAllowed: critical))
             content.userInfo = [
                 "alarmID": item.occurrence.alarmID.uuidString,
                 "fireDate": item.occurrence.fireDate.timeIntervalSince1970,
@@ -88,6 +89,10 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
             let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
             center.add(UNNotificationRequest(identifier: item.id, content: content, trigger: trigger))
         }
+    }
+
+    private func level(_ urgency: NotificationUrgency) -> UNNotificationInterruptionLevel {
+        urgency == .critical ? .critical : .timeSensitive
     }
 
     func clearDelivered() {
@@ -103,7 +108,7 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
             ? "Closing the app doesn't stop it. Open Alarmy to do your mission."
             : "Open it again so your alarm can ring at full volume, even in silent mode."
         content.sound = .default
-        content.interruptionLevel = .critical
+        content.interruptionLevel = level(PlannedNotification.Kind.alarm.urgency(criticalAllowed: criticalEnabled))
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: BackupPlanner.appClosedNoticeDelay, repeats: false)
         center.add(UNNotificationRequest(identifier: "app-closed", content: content, trigger: trigger))
     }

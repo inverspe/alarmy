@@ -24,6 +24,20 @@ public struct PlannedNotification: Equatable {
     }
 }
 
+/// How hard a notification tries to get through.
+public enum NotificationUrgency: Equatable {
+    /// Gets through everything, the silent switch included, but iOS may not allow it.
+    case critical
+    /// Gets through Focus and lights up the lock screen.
+    case timeSensitive
+}
+
+public extension PlannedNotification.Kind {
+    func urgency(criticalAllowed: Bool) -> NotificationUrgency {
+        .critical
+    }
+}
+
 /// Backups that keep going off if the app is killed, including the wake-up check.
 /// iOS allows 64 pending local notifications; this stays within `budget`.
 public enum BackupPlanner {

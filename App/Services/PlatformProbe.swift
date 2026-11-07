@@ -5,6 +5,7 @@ import Foundation
 /// is guarded, so a missing symbol only produces "unavailable".
 enum PlatformProbe {
     static let criticalAlerts = "com.apple.developer.usernotifications.critical-alerts"
+    static let timeSensitive = "com.apple.developer.usernotifications.time-sensitive"
 
     /// What LaunchServices recorded for this app at install time.
     static func launchServicesRecord() -> String {

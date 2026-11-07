@@ -120,6 +120,23 @@ final class BackupPlannerTests: XCTestCase {
         XCTAssertEqual(backups(fire + 580).first?.fireDate, fire + 600)
     }
 
+    // MARK: Getting through
+
+    func testBackupsAreCriticalWhenAllowed() {
+        XCTAssertEqual(PlannedNotification.Kind.alarm.urgency(criticalAllowed: true), .critical)
+        XCTAssertEqual(PlannedNotification.Kind.wakeCheck.urgency(criticalAllowed: true), .critical)
+    }
+
+    func testBackupsAreTimeSensitiveOtherwise() {
+        XCTAssertEqual(PlannedNotification.Kind.alarm.urgency(criticalAllowed: false), .timeSensitive)
+        XCTAssertEqual(PlannedNotification.Kind.wakeCheck.urgency(criticalAllowed: false), .timeSensitive)
+    }
+
+    func testSilentBannersNeverNeedToBeCritical() {
+        XCTAssertEqual(PlannedNotification.Kind.nudge.urgency(criticalAllowed: true), .timeSensitive)
+        XCTAssertEqual(PlannedNotification.Kind.nudge.urgency(criticalAllowed: false), .timeSensitive)
+    }
+
     // MARK: Silent banners while ringing
 
     func testRingStartsWithSilentBanners() {

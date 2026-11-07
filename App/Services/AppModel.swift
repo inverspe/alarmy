@@ -79,6 +79,7 @@ final class AppModel: ObservableObject {
         DiagnosticLog.shared.add("launch build \(build)")
         DiagnosticLog.shared.add(PlatformProbe.launchServicesRecord())
         DiagnosticLog.shared.add(PlatformProbe.runtimeEntitlement(PlatformProbe.criticalAlerts))
+        DiagnosticLog.shared.add(PlatformProbe.runtimeEntitlement(PlatformProbe.timeSensitive))
         BackupSounds.installIfNeeded()
         Task { [weak self] in
             await notifications.logPermissions("at launch")

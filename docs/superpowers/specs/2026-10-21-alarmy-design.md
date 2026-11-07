@@ -156,7 +156,7 @@ Swiping the app closed posts a notification about 2.5 seconds later saying so. T
 
 | Loophole | Handling |
 |---|---|
-| Silent switch / Focus | Alarm audio uses a playback audio session (ignores silent switch). Backup notifications use **critical alerts** (entitlement self-granted via TrollStore). |
+| Silent switch / Focus | Alarm audio uses a playback audio session (ignores silent switch). Backup notifications use **critical alerts** where iOS allows them (entitlement self-granted via TrollStore), and otherwise **Time Sensitive**, which gets through Focus but not the silent switch. |
 | App swiped closed / killed / phone rebooted overnight | **Backup critical-alert notifications** are pre-scheduled about every 30 seconds starting at alarm time. Tapping one opens the app straight into the ringing/mission screen. After a match, backups are rescheduled to end exactly when the countdown ends. Note the iOS limit of 64 pending local notifications. |
 | Ringing with the phone locked or in another app | Ten silent banners over the first minute, which light up the lock screen. Tapping one opens the ringing screen. |
 | App suspended before alarm time | Alarmy-style keep-alive: the app keeps a background audio session running while an alarm is armed so it can play the alarm itself at full control. |
