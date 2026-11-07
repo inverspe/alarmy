@@ -225,6 +225,18 @@ final class MissionLevelTests: XCTestCase {
 }
 
 final class MissionAttemptTests: XCTestCase {
+    func testTheLimitCanBeChanged() {
+        let attempt = MissionAttempt(now: 100, limit: 50)
+        XCTAssertEqual(attempt.remaining(at: 100), 50)
+        XCTAssertFalse(attempt.timedOut(at: 149))
+        XCTAssertTrue(attempt.timedOut(at: 150))
+    }
+
+    func testLimitChoices() {
+        XCTAssertEqual(MissionAttempt.limitChoices, [10, 15, 20, 30, 40, 50])
+        XCTAssertEqual(MissionAttempt.defaultLimit, 20)
+    }
+
     func testGivesTwentySeconds() {
         let attempt = MissionAttempt(now: 100)
         XCTAssertEqual(attempt.remaining(at: 100), 20)

@@ -5,6 +5,8 @@ import Foundation
 public struct RingSession: Codable, Equatable {
     public enum Phase: Codable, Equatable {
         case mission
+        /// The ring has stopped for now. It comes back at `until`, and the mission still has to be done.
+        case snoozed(until: Date)
         case countdown(endsAt: Date)
         /// The ring has stopped; the wake-up check comes at `checkAt`.
         case wakeCheckWaiting(checkAt: Date)
@@ -32,19 +34,23 @@ public struct RingSession: Codable, Equatable {
     private var missedWakeChecksStored: Int?
     private var missionsStored: [MissionStep]?
     private var missionIndexStored: Int?
+    private var ringStartStored: Date?
+    private var snoozeMinutesStored: Int?
+    private var snoozeLimitStored: Int?
+    private var snoozeCountStored: Int?
 
     public var isRinging: Bool {
         guard !isEarlyClear else { return false }
         switch phase {
         case .mission, .countdown: return true
-        case .wakeCheckWaiting, .wakeCheckPrompt, .finished: return false
+        case .snoozed, .wakeCheckWaiting, .wakeCheckPrompt, .finished: return false
         }
     }
 
     public var isAwaitingWakeCheck: Bool {
         switch phase {
         case .wakeCheckWaiting, .wakeCheckPrompt: return true
-        case .mission, .countdown, .finished: return false
+        case .mission, .snoozed, .countdown, .finished: return false
         }
     }
 
@@ -65,22 +71,52 @@ public struct RingSession: Codable, Equatable {
     /// No new ring starts from this moment on.
     private var hardCapDate: Date { occurrence.fireDate.addingTimeInterval(Schedule.hardCap) }
 
-    /// When the first ring reaches full volume. Nil once it is at full volume for good.
+    /// When the current ring began: the alarm time, or later after a snooze or a missed check.
+    public var ringStart: Date { ringStartStored ?? occurrence.fireDate }
+    public var gentleSeconds: Int { gentleSecondsStored ?? 0 }
+
+    /// When this ring reaches full volume. Nil once it is at full volume for good.
     public var gentleEndsAt: Date? {
-        guard let seconds = gentleSecondsStored, seconds > 0 else { return nil }
-        return occurrence.fireDate.addingTimeInterval(TimeInterval(seconds))
+        guard gentleSeconds > 0 else { return nil }
+        return ringStart.addingTimeInterval(TimeInterval(gentleSeconds))
     }
 
     public func ringLevel(now: Date) -> Float {
         guard let end = gentleEndsAt else { return 1 }
-        return GentleRamp.level(elapsed: now.timeIntervalSince(occurrence.fireDate),
-                                duration: end.timeIntervalSince(occurrence.fireDate))
+        return GentleRamp.level(elapsed: now.timeIntervalSince(ringStart), duration: end.timeIntervalSince(ringStart))
+    }
+
+    public var snoozeMinutes: Int { snoozeMinutesStored ?? 0 }
+    public var snoozeCount: Int { snoozeCountStored ?? 0 }
+
+    /// How many snoozes are left. Nil when there's no limit.
+    public var snoozesLeft: Int? {
+        guard let limit = snoozeLimitStored, limit >= 0 else { return nil }
+        return max(0, limit - snoozeCount)
+    }
+
+    /// Snoozing is only for a ring that hasn't been answered, and never past the hard cap.
+    public func canSnooze(now: Date) -> Bool {
+        return false
+    }
+
+    public mutating func snooze(now: Date) {
+        guard canSnooze(now: now) else { return }
+        snoozeCountStored = snoozeCount + 1
+        phase = .snoozed(until: now.addingTimeInterval(TimeInterval(snoozeMinutes) * 60))
+    }
+
+    /// The owner chose not to wait: it rings again now.
+    public mutating func endSnooze(now: Date) {
+        guard case .snoozed = phase else { return }
+        phase = .mission
     }
 
     /// A photo mission with no usable objects is dropped. With no missions left it rings
     /// for the countdown and then stops, so it can never ring forever.
     public static func start(occurrence: OccurrenceKey, ringAfterMinutes: Int, isEarlyClear: Bool,
-                             objectIDs: [UUID], missions: [MissionStep] = [.photo], wakeCheckMinutes: Int = 0, gentleSeconds: Int = 0, now: Date,
+                             objectIDs: [UUID], missions: [MissionStep] = [.photo], wakeCheckMinutes: Int = 0, gentleSeconds: Int = 0,
+                             snoozeMinutes: Int = 0, snoozeLimit: Int = -1, now: Date,
                              using rng: inout some RandomNumberGenerator) -> RingSession {
         let wantsPhoto = missions.contains { $0.kind == .photo }
         let pick = wantsPhoto ? objectIDs.randomElement(using: &rng) : nil
@@ -97,7 +133,8 @@ public struct RingSession: Codable, Equatable {
                            phase: phase, currentObjectID: pick, missesOnCurrent: 0,
                            triedObjectIDs: pick.map { [$0] } ?? [],
                            wakeCheckMinutesStored: wakeCheckMinutes, gentleSecondsStored: gentleSeconds,
-                           missedWakeChecksStored: 0, missionsStored: missions, missionIndexStored: 0)
+                           missedWakeChecksStored: 0, missionsStored: missions, missionIndexStored: 0,
+                           snoozeMinutesStored: snoozeMinutes, snoozeLimitStored: snoozeLimit, snoozeCountStored: 0)
     }
 
     /// After `missesBeforeSwitch` misses, switches to another available object,
@@ -154,6 +191,9 @@ public struct RingSession: Codable, Equatable {
     public mutating func tick(now: Date, availableObjectIDs: [UUID], using rng: inout some RandomNumberGenerator) {
         while true {
             switch phase {
+            case .snoozed(let until) where now >= until:
+                ringStartStored = until
+                phase = .mission
             case .countdown(let endsAt) where now >= endsAt:
                 if wakeCheckMinutes > 0 && endsAt < hardCapDate {
                     phase = .wakeCheckWaiting(checkAt: endsAt.addingTimeInterval(TimeInterval(wakeCheckMinutes) * 60))

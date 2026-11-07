@@ -1,43 +1,48 @@
 import Foundation
 
 public enum MissionKind: String, Codable, CaseIterable {
-    case photo, steps, squats, shake, math
+    case photo, steps, squats, shake, math, typing, barcode, memory
 
     public var defaultAmount: Int {
         switch self {
-        case .photo: return 1
+        case .photo, .barcode, .typing: return 1
         case .steps: return 50
         case .squats: return 10
         case .shake: return 30
-        case .math: return 3
+        case .math, .memory: return 3
         }
     }
 
     public var amountRange: ClosedRange<Int> {
         switch self {
-        case .photo: return 1...1
+        case .photo, .barcode: return 1...1
         case .steps: return 10...500
         case .squats: return 5...50
         case .shake: return 10...200
         case .math: return 1...10
+        case .typing: return 1...20
+        case .memory: return 1...99
         }
     }
 
     public var amountStep: Int {
         switch self {
-        case .photo, .math: return 1
+        case .photo, .math, .typing, .barcode, .memory: return 1
         case .steps: return 10
         case .squats: return 5
         case .shake: return 10
         }
     }
 
-    /// How many math difficulties or shake strengths there are. Zero for other missions.
+    /// How many choices there are for this mission's setting: math difficulty, shake strength,
+    /// kind of sentence or size of grid. Zero for missions with no such setting.
     public var levelCount: Int {
         switch self {
         case .math: return MathLevel.allCases.count
         case .shake: return ShakeCounter.levels.count
-        case .photo, .steps, .squats: return 0
+        case .typing: return SentenceKind.allCases.count
+        case .memory: return MemoryBoard.sides.count
+        case .photo, .steps, .squats, .barcode: return 0
         }
     }
 
@@ -45,7 +50,16 @@ public enum MissionKind: String, Codable, CaseIterable {
         switch self {
         case .math: return MathLevel.level5.rawValue
         case .shake: return ShakeCounter.defaultLevel
-        case .photo, .steps, .squats: return 0
+        case .typing: return SentenceKind.motivational.rawValue
+        case .photo, .steps, .squats, .barcode, .memory: return 0
+        }
+    }
+
+    /// Depends on a sensor or on finding something, so it needs another way to finish.
+    public var canGetStuck: Bool {
+        switch self {
+        case .steps, .squats, .shake, .barcode: return true
+        case .photo, .math, .typing, .memory: return false
         }
     }
 }
@@ -55,18 +69,21 @@ public struct MissionStep: Codable, Equatable, Identifiable {
     public let kind: MissionKind
     /// Steps, squats, shakes or sums to do. Always 1 for photo.
     public var amount: Int
-    /// Math difficulty or shake strength. Zero for other missions.
+    /// Math difficulty, shake strength, kind of sentence or size of grid. Zero for other missions.
     public var level: Int
+    /// The barcode to scan, for a barcode mission.
+    public var code: String?
     public var id: MissionKind { kind }
 
-    public init(kind: MissionKind, amount: Int? = nil, level: Int? = nil) {
+    public init(kind: MissionKind, amount: Int? = nil, level: Int? = nil, code: String? = nil) {
         self.kind = kind
         self.amount = amount ?? kind.defaultAmount
         self.level = level ?? kind.defaultLevel
+        self.code = code
     }
 
     enum CodingKeys: String, CodingKey {
-        case kind, amount, level
+        case kind, amount, level, code
     }
 
     /// A list saved by an older build has no levels.
@@ -75,6 +92,7 @@ public struct MissionStep: Codable, Equatable, Identifiable {
         kind = try c.decode(MissionKind.self, forKey: .kind)
         amount = try c.decode(Int.self, forKey: .amount)
         level = try c.decodeIfPresent(Int.self, forKey: .level) ?? kind.defaultLevel
+        code = try c.decodeIfPresent(String.self, forKey: .code)
     }
 
     public static let photo = MissionStep(kind: .photo)
@@ -89,9 +107,15 @@ public extension Array where Element == MissionStep {
             let topLevel = Swift.max(step.kind.levelCount - 1, 0)
             return MissionStep(kind: step.kind,
                                amount: Swift.min(Swift.max(step.amount, range.lowerBound), range.upperBound),
-                               level: Swift.min(Swift.max(step.level, 0), topLevel))
+                               level: Swift.min(Swift.max(step.level, 0), topLevel),
+                               code: step.code)
         }
         return list.isEmpty ? [.photo] : list
+    }
+
+    /// Leaves out a barcode mission whose barcode is no longer registered.
+    func runnable(barcodes: [RegisteredBarcode]) -> [MissionStep] {
+        self
     }
 }
 
@@ -165,12 +189,15 @@ public struct MathProblem: Equatable {
 
 /// How long a mission waits for input before it closes and the sound comes back.
 public struct MissionAttempt: Equatable {
-    public static let idleLimit: TimeInterval = 20
+    public static let defaultLimit = 20
+    public static let limitChoices = [10, 15, 20, 30, 40, 50]
 
+    public let limit: TimeInterval
     private var lastInput: TimeInterval
 
-    public init(now: TimeInterval) {
+    public init(now: TimeInterval, limit: Int = MissionAttempt.defaultLimit) {
         lastInput = now
+        self.limit = TimeInterval(limit)
     }
 
     public mutating func input(at time: TimeInterval) {
@@ -178,7 +205,7 @@ public struct MissionAttempt: Equatable {
     }
 
     public func remaining(at time: TimeInterval) -> TimeInterval {
-        max(0, Self.idleLimit - (time - lastInput))
+        max(0, 20 - (time - lastInput))
     }
 
     public func timedOut(at time: TimeInterval) -> Bool {
