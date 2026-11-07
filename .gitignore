@@ -1,0 +1,6 @@
+# Never commit an app copy or anything built from one.
+*.ipa
+*.tipa
+*.dylib
+Payload/
+out/
