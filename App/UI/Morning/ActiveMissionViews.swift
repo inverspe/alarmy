@@ -103,7 +103,6 @@ struct MissionTopBar: View {
                     Capsule()
                         .fill(fraction > 0.5 ? tint : fraction > 0.25 ? Theme.horizon : Theme.siren)
                         .frame(width: geo.size.width * fraction)
-                        .animation(.linear(duration: 1), value: fraction)
                 }
             }
             .frame(height: 8)
