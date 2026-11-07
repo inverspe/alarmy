@@ -34,7 +34,7 @@ public enum NotificationUrgency: Equatable {
 
 public extension PlannedNotification.Kind {
     func urgency(criticalAllowed: Bool) -> NotificationUrgency {
-        .critical
+        self == .nudge || !criticalAllowed ? .timeSensitive : .critical
     }
 }
 
