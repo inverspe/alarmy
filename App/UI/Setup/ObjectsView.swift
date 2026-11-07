@@ -59,6 +59,8 @@ struct ObjectsView: View {
                         .foregroundColor(Theme.dusk)
                         .padding(.top, 12)
                 }
+
+                BarcodesSection()
             }
             .padding(.horizontal, Theme.gutter)
             .padding(.bottom, 32)

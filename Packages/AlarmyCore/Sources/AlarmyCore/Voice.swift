@@ -25,7 +25,7 @@ public struct VoiceCycle: Equatable {
     public private(set) var announcements = 0
 
     public init(now: TimeInterval) {
-        stage = .waiting(until: now + 1)
+        stage = .waiting(until: now + Self.firstDelay)
     }
 
     public var holdsSoundBack: Bool {
@@ -41,12 +41,16 @@ public struct VoiceCycle: Equatable {
             announcements += 1
             stage = .speaking(since: now)
             return .speak
+        case .speaking(let since) where now - since >= Self.longestSpeech:
+            stage = .waiting(until: now + Self.repeatDelay)
+            return .gaveUp
         default:
             return .none
         }
     }
 
     public mutating func speechFinished(now: TimeInterval) {
+        guard holdsSoundBack else { return }
         stage = .waiting(until: now + Self.repeatDelay)
     }
 
@@ -57,7 +61,7 @@ public struct VoiceCycle: Equatable {
 
     public mutating func resume(now: TimeInterval) {
         guard isPaused else { return }
-        stage = .waiting(until: now)
+        stage = .waiting(until: now + Self.repeatDelay)
     }
 }
 
@@ -70,7 +74,7 @@ public enum VoiceScript {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.timeZone = timeZone
-            formatter.dateFormat = "h:mm a"
+            formatter.dateFormat = first ? "EEEE, MMMM dd, h:mm a" : "h:mm a"
             result.append(formatter.string(from: date))
         }
         if let weather, !weather.isEmpty { result.append(weather) }
@@ -85,8 +89,8 @@ public struct WeatherPlace: Codable, Equatable {
     public let longitude: Double
 
     public init(latitude: Double, longitude: Double) {
-        self.latitude = latitude
-        self.longitude = longitude
+        self.latitude = (latitude * 100).rounded() / 100
+        self.longitude = (longitude * 100).rounded() / 100
     }
 }
 
@@ -149,13 +153,14 @@ public struct WeatherReport: Equatable {
               let high = response.daily.temperature_2m_max.first,
               let low = response.daily.temperature_2m_min.first else { return nil }
         return WeatherReport(condition: condition(code: response.current.weather_code),
-                             temperature: Int(high), high: Int(high), low: Int(low))
+                             temperature: Int(response.current.temperature_2m), high: Int(high), low: Int(low))
     }
 
     /// The standard WMO weather codes.
     static func condition(code: Int) -> Condition {
         switch code {
         case 0: return .sunny
+        case 1, 2: return .lightlyCloudy
         case 3: return .cloudy
         case 45, 48: return .misty
         case 51...67, 80...82: return .rainy

@@ -10,10 +10,14 @@ final class AlarmyUITests: XCTestCase {
     }
 
     private func launch(ring: String? = "now", missions: String = "photo", sensor: String = "count",
-                        wakeCheck: Int = 0, ringAfter: Int = 1, gentle: Int = 0, twoFinger: Bool = false) {
+                        wakeCheck: Int = 0, ringAfter: Int = 1, gentle: Int = 0, twoFinger: Bool = false,
+                        snooze: String? = nil, voice: Bool = false, scans: String? = nil) {
         app = XCUIApplication()
         var environment = ["ALARMY_UITEST_SENSOR": sensor]
         if twoFinger { environment["ALARMY_UITEST_TWO_FINGER"] = "1" }
+        if let snooze { environment["ALARMY_UITEST_SNOOZE"] = snooze }
+        if voice { environment["ALARMY_UITEST_VOICE"] = "1" }
+        if let scans { environment["ALARMY_UITEST_SCANS"] = scans }
         if let ring {
             environment["ALARMY_UITEST_RING"] = ring
             environment["ALARMY_UITEST_MISSIONS"] = missions
@@ -185,6 +189,153 @@ final class AlarmyUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["math-problem"].exists)
     }
 
+    // MARK: Snooze
+
+    func testSnoozeStopsTheRingThenItComesBack() {
+        launch(missions: "math:1", snooze: "1:2")
+        let first = app.buttons["Snooze 1 min, 2 left"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10), "No snooze button")
+        shot("snooze-button")
+        first.tap()
+        expect("Snoozed")
+        expect("1 snooze left")
+        shot("snoozed")
+
+        expect("Your mission", within: 70)
+        let second = app.buttons["Snooze 1 min, 1 left"]
+        XCTAssertTrue(second.exists, "Snoozes didn't count down")
+        second.tap()
+        expect("No snoozes left")
+
+        expect("Your mission", within: 70)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Snooze'")).firstMatch.exists, "Could snooze past the limit")
+        shot("snooze-used-up")
+    }
+
+    func testNotWaitingForTheSnoozeGoesToTheMission() {
+        launch(missions: "math:1", snooze: "5:3")
+        let snooze = app.buttons["Snooze 5 min, 3 left"]
+        XCTAssertTrue(snooze.waitForExistence(timeout: 10))
+        snooze.tap()
+        expect("Snoozed")
+        app.buttons["Do my mission now"].tap()
+        expect("Sum 1 of 1")
+        answerSum()
+        expect("Mission done ✓")
+    }
+
+    func testNoSnoozeUnlessItIsTurnedOn() {
+        launch(missions: "math:1")
+        expect("Your mission")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Snooze'")).firstMatch.exists)
+    }
+
+    // MARK: Voice
+
+    func testSpeakingDoesNotGetInTheWay() {
+        launch(missions: "math:1", voice: true)
+        expect("Your mission")
+        expect("Test label")
+        shot("ring-with-label")
+        sleep(35)
+        XCTAssertTrue(app.buttons["Start mission"].exists, "Ring screen went away while speaking")
+        startMission()
+        expect("Sum 1 of 1")
+        answerSum()
+        expect("Mission done ✓")
+    }
+
+    // MARK: Typing
+
+    func testTypingMissionNeedsTheExactSentence() {
+        launch(missions: "typing:1:0")
+        startMission()
+        let target = app.staticTexts["typing-target"]
+        XCTAssertTrue(target.waitForExistence(timeout: 10))
+        let sentence = target.label
+        let entry = app.textFields["typing-entry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        shot("typing")
+        entry.tap()
+        entry.typeText("x")
+        app.buttons["Done"].tap()
+        expect("Not quite. Check it and try again.")
+        shot("typing-wrong")
+        XCTAssertEqual(target.label, sentence, "A different sentence after a wrong one")
+        entry.typeText(XCUIKeyboardKey.delete.rawValue)
+        entry.typeText(sentence)
+        app.buttons["Done"].tap()
+        expect("Mission done ✓", within: 10)
+    }
+
+    // MARK: Memory
+
+    func testMemoryMissionFindsTheTiles() {
+        launch(missions: "memory:2:0")
+        startMission()
+        for round in 1...2 {
+            expect("Round \(round) of 2")
+            if round == 1 { shot("memory-waiting") }
+            expect("Now find them", within: 6)
+            sleep(1)
+            let tiles = (0..<9).map { app.buttons["tile-\($0)"] }
+            let targets = tiles.filter { ($0.value as? String) == "target" }
+            XCTAssertEqual(targets.count, 3)
+            if round == 1 {
+                tiles.first { ($0.value as? String) == "other" }?.tap()
+                shot("memory-wrong")
+                sleep(1)
+            }
+            targets.forEach { $0.tap() }
+            sleep(1)
+        }
+        expect("Mission done ✓", within: 10)
+    }
+
+    func testBiggestMemoryGridFits() {
+        launch(missions: "memory:1:4")
+        startMission()
+        expect("Now find them", within: 6)
+        XCTAssertTrue(app.buttons["tile-48"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["tile-48"].isHittable, "Bottom corner is off the screen")
+        shot("memory-biggest")
+    }
+
+    // MARK: Barcode
+
+    func testBarcodeMissionOnlyTakesTheRightCode() {
+        launch(missions: "barcode", scans: "WRONG-CODE,RIGHT-CODE")
+        expect("Scan Test code")
+        startMission()
+        expect("That's not the right barcode.", within: 6)
+        shot("barcode-wrong")
+        expect("Mission done ✓", within: 10)
+    }
+
+    func testAddingABarcode() {
+        launch(ring: "later", scans: "NEW-CODE")
+        app.tabBars.buttons["Objects"].tap()
+        let add = app.buttons["Add barcode"]
+        scrollTo(add)
+        add.tap()
+        expect("Found NEW-CODE", within: 6)
+        let name = app.textFields["barcode-name"]
+        name.tap()
+        name.typeText("Toothpaste")
+        shot("barcode-add")
+        app.buttons["Save barcode"].tap()
+        expect("Toothpaste")
+        shot("barcodes-list")
+    }
+
+    func testSettingsHasTheTimeLimitAndSentences() {
+        launch(ring: "later")
+        app.tabBars.buttons["Settings"].tap()
+        expect("Mission time limit")
+        XCTAssertTrue(app.buttons["My own sentences"].exists)
+        shot("settings")
+    }
+
     func testSquatsStartWithTwoFingers() {
         launch(missions: "squats:5", sensor: "stuck", twoFinger: true)
         startMission()
@@ -313,6 +464,9 @@ final class AlarmyUITests: XCTestCase {
         shot("editor-three-missions")
         XCTAssertTrue(app.switches["Vibrate"].exists, "No vibrate setting")
         XCTAssertTrue(app.switches["Quiet during missions"].exists, "No quiet setting")
+        XCTAssertTrue(app.switches["Snooze"].exists, "No snooze setting")
+        XCTAssertTrue(app.switches["Say the time"].exists, "No voice setting")
+        XCTAssertTrue(app.switches["Say the weather"].exists, "No weather setting")
 
         let stepsAmount = app.steppers["50 steps"]
         scrollTo(stepsAmount)

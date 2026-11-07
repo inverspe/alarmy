@@ -10,6 +10,9 @@ extension MissionKind {
         case .squats: return "Squats"
         case .shake: return "Shake"
         case .math: return "Math"
+        case .typing: return "Typing"
+        case .barcode: return "Barcode"
+        case .memory: return "Memory"
         }
     }
 
@@ -20,13 +23,18 @@ extension MissionKind {
         case .squats: return "figure.strengthtraining.traditional"
         case .shake: return "iphone.radiowaves.left.and.right"
         case .math: return "plus.forwardslash.minus"
+        case .typing: return "keyboard"
+        case .barcode: return "barcode.viewfinder"
+        case .memory: return "square.grid.3x3.fill"
         }
     }
 
     /// "30 steps", or "1 sum". Nil when there's no amount to choose.
     func amountText(_ amount: Int) -> String? {
         switch self {
-        case .photo: return nil
+        case .photo, .barcode: return nil
+        case .typing: return amount == 1 ? "1 sentence" : "\(amount) sentences"
+        case .memory: return amount == 1 ? "1 round" : "\(amount) rounds"
         case .steps: return amount == 1 ? "1 step" : "\(amount) steps"
         case .squats: return amount == 1 ? "1 squat" : "\(amount) squats"
         case .shake: return amount == 1 ? "1 shake" : "\(amount) shakes"
@@ -39,7 +47,9 @@ extension MissionKind {
         switch self {
         case .math: return "Difficulty"
         case .shake: return "Strength"
-        case .photo, .steps, .squats: return nil
+        case .typing: return "Sentences"
+        case .memory: return "Grid"
+        case .photo, .steps, .squats, .barcode: return nil
         }
     }
 
@@ -50,7 +60,12 @@ extension MissionKind {
         case .shake:
             let names = ["Very light", "Light", "Medium", "Hard", "Very hard"]
             return names.indices.contains(level) ? names[level] : ""
-        case .photo, .steps, .squats:
+        case .typing:
+            return SentenceKind(rawValue: level)?.title ?? ""
+        case .memory:
+            let side = MemoryBoard.sides.indices.contains(level) ? MemoryBoard.sides[level] : 3
+            return "\(side) × \(side)"
+        case .photo, .steps, .squats, .barcode:
             return ""
         }
     }
@@ -80,7 +95,7 @@ struct MissionTopBar: View {
     var tint: Color = Theme.night
 
     var body: some View {
-        let fraction = max(0, min(1, model.missionSecondsLeft / MissionAttempt.idleLimit))
+        let fraction = max(0, min(1, model.missionSecondsLeft / model.missionTimeLimit))
         HStack(spacing: 12) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -111,7 +126,7 @@ struct MissionTopBar: View {
 }
 
 /// Backing out is only possible when clearing early: nothing is ringing yet.
-private struct EarlyClearExit: View {
+struct EarlyClearExit: View {
     @EnvironmentObject private var model: AppModel
     let session: RingSession
 
@@ -426,7 +441,7 @@ struct MathMissionView: View {
             guard let answer = Int(entry) else { return }
             check(answer)
         default:
-            if entry.count < 7 { entry.append(key) }
+            if entry.count < 6 { entry.append(key) }
         }
     }
 

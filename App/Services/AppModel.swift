@@ -16,7 +16,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var now = Date()
     /// A mission screen is up. The sound stops while it is, unless the alarm says otherwise.
     @Published private(set) var missionOpen = false
-    @Published private(set) var missionSecondsLeft = MissionAttempt.idleLimit
+    @Published private(set) var missionSecondsLeft = TimeInterval(MissionAttempt.defaultLimit)
     /// The last mission closed because nothing was happening.
     @Published private(set) var missionTimedOut = false
     /// The owner switched the sound on or off with the mission open. Lasts until the ring ends.
@@ -25,6 +25,9 @@ final class AppModel: ObservableObject {
     let audio = AlarmAudio()
     let volume = VolumeEnforcer()
     let notifications = NotificationScheduler()
+    private let voice = VoiceAnnouncer()
+    private let weather = WeatherService()
+    private let location = LocationFinder()
     let photos: ObjectPhotoStore
 
     private let store: StateStore
@@ -40,6 +43,8 @@ final class AppModel: ObservableObject {
     private var stuck = MissionStuckTracker()
     private var lastMissionTick: TimeInterval = 0
     private var lastVibration: TimeInterval = 0
+    private var voiceCycle: VoiceCycle?
+    private var lastWeatherCheck = Date.distantPast
     /// Constant for the life of the process; a different value means the phone rebooted.
     private let bootID = AppModel.bootSessionID()
 
@@ -61,6 +66,11 @@ final class AppModel: ObservableObject {
             UIApplication.shared.applicationState == .active && (self?.state.ringSession?.isRinging ?? false)
         }
         notifications.onTap = { [weak self] in self?.tick() }
+        voice.onFinished = { [weak self] in
+            self?.voiceCycle?.speechFinished(now: Self.monotonic())
+            self?.syncAudio()
+        }
+        location.onPlace = { [weak self] place in self?.setWeatherPlace(place) }
         UNUserNotificationCenter.current().delegate = notifications
 
         let notifications = self.notifications
@@ -128,6 +138,7 @@ final class AppModel: ObservableObject {
     /// yet on a cold launch from a backup tap), then ticks.
     func sceneBecameActive() {
         if modelRinging { volume.start() }
+        if state.alarms.contains(where: \.voiceWeather) { location.find(asking: false) }
         tick()
     }
 
@@ -164,8 +175,10 @@ final class AppModel: ObservableObject {
         if s.ringSession == nil,
            let due = Schedule.activeOccurrence(s.alarms, completed: s.completed, now: t, calendar: calendar) {
             s.ringSession = RingSession.start(occurrence: due.key, ringAfterMinutes: due.alarm.ringAfterMinutes,
-                                              isEarlyClear: false, objectIDs: usableObjectIDs(in: s), missions: due.alarm.missions,
+                                              isEarlyClear: false, objectIDs: usableObjectIDs(in: s),
+                                              missions: due.alarm.missions.runnable(barcodes: s.barcodes),
                                               wakeCheckMinutes: due.alarm.wakeCheckMinutes, gentleSeconds: due.alarm.gentleSeconds,
+                                              snoozeMinutes: due.alarm.snoozeOn ? due.alarm.snoozeMinutes : 0, snoozeLimit: due.alarm.snoozeLimit,
                                               now: t, using: &rng)
         }
 
@@ -184,7 +197,9 @@ final class AppModel: ObservableObject {
 
         if s != state { commit(s) }
         syncMission()
+        syncVoice(at: t)
         syncAudio()
+        refreshWeather(at: t)
 
         let ringing = state.ringSession?.isRinging ?? false
         if planDirty || (ringing && t.timeIntervalSince(lastPlanAt) >= 60) || t.timeIntervalSince(lastPlanAt) >= 900 {
@@ -202,6 +217,11 @@ final class AppModel: ObservableObject {
         var s = state
         change(&s)
         if s.objects.isEmpty && s.alarms.contains(where: { $0.isEnabled && $0.needsObjects }) { return false }
+        let barcodes = s.barcodes
+        let missingBarcode = s.alarms.contains { alarm in
+            alarm.isEnabled && alarm.missions.runnable(barcodes: barcodes).count != alarm.missions.count
+        }
+        if missingBarcode { return false }
         s.completed = Completion.suppressFired(old: state.alarms, new: s.alarms, completed: s.completed,
                                                now: trustedNow(), calendar: calendar)
         commit(s)
@@ -226,7 +246,7 @@ final class AppModel: ObservableObject {
         guard let occurrence = earlyClearable else { return }
         var s = state
         s.ringSession = RingSession.start(occurrence: occurrence.key, ringAfterMinutes: occurrence.alarm.ringAfterMinutes,
-                                          isEarlyClear: true, objectIDs: usableObjectIDs(in: s), missions: occurrence.alarm.missions,
+                                          isEarlyClear: true, objectIDs: usableObjectIDs(in: s), missions: occurrence.alarm.missions.runnable(barcodes: s.barcodes),
                                           now: trustedNow(), using: &rng)
         commit(s)
         tick()
@@ -246,8 +266,8 @@ final class AppModel: ObservableObject {
     func openMission() {
         guard state.ringSession?.phase == .mission else { return }
         let time = Self.monotonic()
-        missionAttempt = MissionAttempt(now: time)
-        missionSecondsLeft = MissionAttempt.idleLimit
+        missionAttempt = MissionAttempt(now: time, limit: state.missionTimeLimit)
+        missionSecondsLeft = missionTimeLimit
         lastMissionTick = time
         missionTimedOut = false
         missionOpen = true
@@ -258,7 +278,73 @@ final class AppModel: ObservableObject {
     /// Anything the owner does in a mission starts its time again.
     func noteMissionInput() {
         missionAttempt?.input(at: Self.monotonic())
-        missionSecondsLeft = MissionAttempt.idleLimit
+        missionSecondsLeft = missionTimeLimit
+    }
+
+    var missionTimeLimit: TimeInterval { TimeInterval(state.missionTimeLimit) }
+
+    /// A moment's pause, then a buzz, then on to whatever is next.
+    func finishMissionSoon(_ kind: MissionKind) {
+        noteMissionInput()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            Haptics.success()
+            self?.completeMission(kind)
+        }
+    }
+
+    var canSnooze: Bool { state.ringSession?.canSnooze(now: now) ?? false }
+
+    func snooze() {
+        guard var session = state.ringSession, session.canSnooze(now: trustedNow()) else { return }
+        session.snooze(now: trustedNow())
+        DiagnosticLog.shared.add("snoozed, \(session.snoozeCount) so far")
+        var s = state
+        s.ringSession = session
+        commit(s)
+        tick()
+    }
+
+    /// Rather than wait, the owner gets on with it: it rings again and the mission starts.
+    func endSnooze() {
+        guard var session = state.ringSession else { return }
+        session.endSnooze(now: trustedNow())
+        var s = state
+        s.ringSession = session
+        commit(s)
+        tick()
+        openMission()
+    }
+
+    func barcodeName(_ code: String?) -> String {
+        state.barcodes.first { $0.code == code }?.name ?? "your barcode"
+    }
+
+    func addBarcode(name: String, code: String) -> Bool {
+        update { $0.barcodes.append(RegisteredBarcode(name: name, code: code)) }
+    }
+
+    /// Refused while an alarm that's on still needs it.
+    func deleteBarcode(_ id: UUID) -> Bool {
+        update { $0.barcodes.removeAll { $0.id == id } }
+    }
+
+    func addSentence(_ text: String) -> Bool {
+        guard let sentence = Sentences.cleaned(text), state.customSentences.count < Sentences.maxCustom else { return false }
+        return update { $0.customSentences.append(sentence) }
+    }
+
+    func removeSentence(at index: Int) {
+        guard state.customSentences.indices.contains(index) else { return }
+        update { $0.customSentences.remove(at: index) }
+    }
+
+    func setMissionTimeLimit(_ seconds: Int) {
+        update { $0.missionTimeLimit = seconds }
+    }
+
+    /// Called when an alarm has the weather turned on, which is the moment to ask for location access.
+    func askForWeatherLocation() {
+        location.find(asking: true)
     }
 
     /// The sensor counted something, so it's working.
@@ -412,7 +498,7 @@ final class AppModel: ObservableObject {
             return
         }
         let time = Self.monotonic()
-        if let kind = session.currentMission?.kind, kind != .photo, kind != .math {
+        if let kind = session.currentMission?.kind, kind.canGetStuck {
             let wasStuck = stuck.isStuck(kind)
             stuck.add(time - lastMissionTick, to: kind)
             // A full 20 seconds to read the way out that has just appeared.
@@ -438,6 +524,59 @@ final class AppModel: ObservableObject {
         missionAttempt = nil
     }
 
+    /// When to speak is decided here. Saying nothing is fine, but the sound always has to come back.
+    private func syncVoice(at time: Date) {
+        guard state.ringSession?.isRinging == true, let alarm = sessionOccurrence?.alarm, alarm.voiceIsOn else {
+            if voiceCycle != nil {
+                voice.stop()
+                voiceCycle = nil
+            }
+            return
+        }
+        let seconds = Self.monotonic()
+        var cycle = voiceCycle ?? VoiceCycle(now: seconds)
+        if missionOpen {
+            if !cycle.isPaused {
+                cycle.pause()
+                voice.stop()
+            }
+        } else if cycle.isPaused {
+            cycle.resume(now: seconds)
+        }
+        switch cycle.tick(now: seconds) {
+        case .speak:
+            let lines = VoiceScript.lines(sayTime: alarm.voiceTime, weather: alarm.voiceWeather ? weather.spokenLine(now: time) : nil,
+                                          label: alarm.voiceLabel ? alarm.label : nil, first: cycle.announcements == 1, date: time)
+            DiagnosticLog.shared.add("speaking \(lines.count) lines")
+            voice.speak(lines)
+        case .gaveUp:
+            DiagnosticLog.shared.add("speech never finished, sound back")
+            voice.stop()
+        case .none:
+            break
+        }
+        voiceCycle = cycle
+    }
+
+    /// Fetched shortly before an alarm that reads out the weather, and during its ring.
+    private func refreshWeather(at t: Date) {
+        guard t.timeIntervalSince(lastWeatherCheck) >= 15, let place = state.weatherPlace else { return }
+        lastWeatherCheck = t
+        let wanting = state.alarms.filter(\.voiceWeather)
+        guard !wanting.isEmpty else { return }
+        let ringing = state.ringSession?.isRinging == true && sessionOccurrence?.alarm.voiceWeather == true
+        let soon = Schedule.upcoming(wanting, after: t, calendar: calendar, limit: 1).first
+            .map { $0.fireDate.timeIntervalSince(t) <= WeatherReport.fetchAhead } ?? false
+        if ringing || soon { weather.refreshIfNeeded(place: place, now: t) }
+    }
+
+    private func setWeatherPlace(_ place: WeatherPlace) {
+        guard state.weatherPlace != place else { return }
+        var s = state
+        s.weatherPlace = place
+        commit(s)
+    }
+
     /// True while the sound should be held back for an open mission.
     private var missionQuiet: Bool {
         guard missionOpen, state.ringSession?.isRinging == true else { return false }
@@ -459,7 +598,7 @@ final class AppModel: ObservableObject {
                 missionQuietChoice = nil
             }
         }
-        audio.setQuiet(missionQuiet)
+        audio.setQuiet(missionQuiet || (voiceCycle?.holdsSoundBack ?? false))
         if ringing, !missionOpen, sessionOccurrence?.alarm.vibrate ?? true {
             let time = Self.monotonic()
             if time - lastVibration >= 0.9 {
@@ -468,7 +607,10 @@ final class AppModel: ObservableObject {
             }
         }
         var answering = false
-        if case .wakeCheckPrompt = state.ringSession?.phase { answering = true }
+        switch state.ringSession?.phase {
+        case .wakeCheckPrompt, .snoozed: answering = true
+        default: break
+        }
         UIApplication.shared.isIdleTimerDisabled = ringing || answering
         let armed = state.alarms.contains(where: \.isEnabled)
         if armed != modelKeepAlive {
@@ -481,8 +623,8 @@ final class AppModel: ObservableObject {
     /// Counted from the alarm time, so reopening the app partway through doesn't start the ramp over.
     private func gentleProgress() -> (elapsed: TimeInterval, duration: TimeInterval)? {
         guard let session = state.ringSession, let end = session.gentleEndsAt else { return nil }
-        let fire = session.occurrence.fireDate
-        return (now.timeIntervalSince(fire), end.timeIntervalSince(fire))
+        let start = session.ringStart
+        return (now.timeIntervalSince(start), end.timeIntervalSince(start))
     }
 
     private func appWillTerminate() {

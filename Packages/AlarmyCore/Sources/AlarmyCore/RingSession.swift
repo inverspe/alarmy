@@ -97,7 +97,9 @@ public struct RingSession: Codable, Equatable {
 
     /// Snoozing is only for a ring that hasn't been answered, and never past the hard cap.
     public func canSnooze(now: Date) -> Bool {
-        return false
+        guard phase == .mission, !isEarlyClear, snoozeMinutes > 0 else { return false }
+        if let left = snoozesLeft, left < 1 { return false }
+        return now.addingTimeInterval(TimeInterval(snoozeMinutes) * 60) < hardCapDate
     }
 
     public mutating func snooze(now: Date) {
@@ -109,6 +111,7 @@ public struct RingSession: Codable, Equatable {
     /// The owner chose not to wait: it rings again now.
     public mutating func endSnooze(now: Date) {
         guard case .snoozed = phase else { return }
+        ringStartStored = now
         phase = .mission
     }
 
@@ -222,6 +225,8 @@ public struct RingSession: Codable, Equatable {
         }
         missedWakeChecksStored = missedWakeChecks + 1
         gentleSecondsStored = nil
+        ringStartStored = now
+        snoozeCountStored = 0
         missesOnCurrent = 0
         missionIndexStored = 0
         if missions.contains(where: { $0.kind == .photo }) {

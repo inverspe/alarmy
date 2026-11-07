@@ -11,6 +11,11 @@ enum UITestHarness {
     /// "count" counts on its own, "none" acts as if there's no sensor, "stuck" never counts.
     static var sensorMode: String? { environment["ALARMY_UITEST_SENSOR"] }
 
+    /// Codes the pretend camera sees, one every 2 seconds.
+    static var fakeScans: [String]? {
+        environment["ALARMY_UITEST_SCANS"].map { $0.split(separator: ",").map(String.init) }
+    }
+
     /// Squats normally skip the two-finger start here, as a test can't hold two fingers down.
     static var wantsTwoFingerStart: Bool { environment["ALARMY_UITEST_TWO_FINGER"] == "1" }
 
@@ -21,13 +26,25 @@ enum UITestHarness {
         var state = AppState()
         state.onboardingDone = true
         state.objects = [seedObject(in: support.appendingPathComponent("objects"))]
+        state.barcodes = [RegisteredBarcode(name: "Test code", code: seedCode)]
 
         let offset: TimeInterval = ring == "soon" ? 20 * 60 : ring == "later" ? 6 * 3600 : 0
         let time = Calendar.current.dateComponents([.hour, .minute], from: Date().addingTimeInterval(offset))
         state.alarms = [Alarm(hour: time.hour ?? 0, minute: time.minute ?? 0, ringAfterMinutes: number("RING_AFTER", 1),
                               lockHours: 0, earlyClearMinutes: 30, gentleSeconds: number("GENTLE", 0),
-                              wakeCheckMinutes: number("WAKE_CHECK", 0), missions: missions())]
+                              wakeCheckMinutes: number("WAKE_CHECK", 0), missions: missions(),
+                              label: environment["ALARMY_UITEST_VOICE"] == nil ? "" : "Test label",
+                              snoozeOn: environment["ALARMY_UITEST_SNOOZE"] != nil,
+                              snoozeMinutes: snooze.first ?? 5, snoozeLimit: snooze.last ?? 3,
+                              voiceTime: environment["ALARMY_UITEST_VOICE"] != nil, voiceLabel: environment["ALARMY_UITEST_VOICE"] != nil)]
         try? StateStore(fileURL: support.appendingPathComponent("state.json")).save(state)
+    }
+
+    private static let seedCode = "RIGHT-CODE"
+
+    /// "minutes:limit".
+    private static var snooze: [Int] {
+        (environment["ALARMY_UITEST_SNOOZE"] ?? "").split(separator: ":").compactMap { Int($0) }
     }
 
     private static func number(_ name: String, _ fallback: Int) -> Int {
@@ -40,7 +57,8 @@ enum UITestHarness {
         return text.split(separator: ",").compactMap { item in
             let parts = item.split(separator: ":")
             guard let name = parts.first, let kind = MissionKind(rawValue: String(name)) else { return nil }
-            return MissionStep(kind: kind, amount: parts.count > 1 ? Int(parts[1]) : nil, level: parts.count > 2 ? Int(parts[2]) : nil)
+            return MissionStep(kind: kind, amount: parts.count > 1 ? Int(parts[1]) : nil, level: parts.count > 2 ? Int(parts[2]) : nil,
+                               code: kind == .barcode ? seedCode : nil)
         }
     }
 

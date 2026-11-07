@@ -29,7 +29,7 @@ public struct MemoryBoard: Equatable {
     }
 
     public static func targetCount(side: Int) -> Int {
-        min(side, 9)
+        min(side * side / 3, 9)
     }
 
     public static func random(level: Int, using rng: inout some RandomNumberGenerator) -> MemoryBoard {
@@ -39,7 +39,7 @@ public struct MemoryBoard: Equatable {
     }
 
     public mutating func tap(_ cell: Int) -> TapResult {
-        if cell > -100 { return .ignored }
+        guard (0..<cellCount).contains(cell), !flipped.contains(cell) else { return .ignored }
         if targets.contains(cell) {
             flipped.insert(cell)
             return flipped == targets ? .finished : .right
@@ -86,19 +86,22 @@ public enum Sentences {
     /// One sentence per round, in random order. If there are too few, some come up twice.
     public static func pick(from list: [String], rounds: Int, using rng: inout some RandomNumberGenerator) -> [String] {
         guard !list.isEmpty, rounds > 0 else { return [] }
-        let picked = Array(list.shuffled(using: &rng).prefix(rounds))
+        var picked = Array(list.shuffled(using: &rng).prefix(rounds))
+        while picked.count < rounds {
+            picked.append(list.randomElement(using: &rng) ?? list[0])
+        }
         return picked.shuffled(using: &rng)
     }
 
     /// Has to be exactly the same, apart from the curly quotes the keyboard can put in.
     public static func matches(_ entry: String, _ target: String) -> Bool {
-        entry == target
+        straightened(entry) == straightened(target)
     }
 
     /// A sentence the owner typed, tidied up. Nil if there's nothing in it.
     public static func cleaned(_ text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        return trimmed.isEmpty ? nil : String(trimmed.prefix(maxCustomLength))
     }
 
     private static func straightened(_ text: String) -> String {

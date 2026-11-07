@@ -115,7 +115,7 @@ public extension Array where Element == MissionStep {
 
     /// Leaves out a barcode mission whose barcode is no longer registered.
     func runnable(barcodes: [RegisteredBarcode]) -> [MissionStep] {
-        self
+        filter { step in step.kind != .barcode || barcodes.contains { $0.code == step.code } }
     }
 }
 
@@ -205,7 +205,7 @@ public struct MissionAttempt: Equatable {
     }
 
     public func remaining(at time: TimeInterval) -> TimeInterval {
-        max(0, 20 - (time - lastInput))
+        max(0, limit - (time - lastInput))
     }
 
     public func timedOut(at time: TimeInterval) -> Bool {

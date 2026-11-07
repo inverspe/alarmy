@@ -3,6 +3,7 @@ import AlarmyCore
 
 /// The alarm's missions, done top to bottom. Each kind can be added once.
 struct MissionListEditor: View {
+    @EnvironmentObject private var model: AppModel
     @Binding var missions: [MissionStep]
 
     private var unused: [MissionKind] {
@@ -64,6 +65,9 @@ struct MissionListEditor: View {
                     Text(text).font(Theme.body.monospacedDigit()).foregroundColor(Theme.dusk)
                 }
             }
+            if step.kind == .barcode {
+                barcodeChoice(at: index)
+            }
             if let title = step.kind.levelTitle {
                 HStack {
                     Text(title).font(Theme.body).foregroundColor(Theme.dusk)
@@ -79,6 +83,26 @@ struct MissionListEditor: View {
         .padding(12)
         .background(Theme.nightSurface)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func barcodeChoice(at index: Int) -> some View {
+        if model.state.barcodes.isEmpty {
+            Text("Add a barcode on the Objects tab first.")
+                .font(Theme.caption)
+                .foregroundColor(Theme.siren)
+        } else {
+            HStack {
+                Text("Barcode").font(Theme.body).foregroundColor(Theme.dusk)
+                Spacer()
+                Picker("Barcode", selection: Binding(get: { missions[index].code }, set: { missions[index].code = $0 })) {
+                    Text("Choose").tag(String?.none)
+                    ForEach(model.state.barcodes) { Text($0.name).tag(String?.some($0.code)) }
+                }
+                .pickerStyle(.menu)
+                .tint(Theme.sunlight)
+            }
+        }
     }
 
     private func iconButton(_ symbol: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
@@ -102,6 +126,6 @@ struct MissionListEditor: View {
     }
 
     private func add(_ kind: MissionKind) {
-        missions.append(MissionStep(kind: kind))
+        missions.append(MissionStep(kind: kind, code: kind == .barcode ? model.state.barcodes.first?.code : nil))
     }
 }

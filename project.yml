@@ -25,7 +25,8 @@ targets:
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        NSCameraUsageDescription: "Alarmy photographs your registered objects to turn off the alarm."
+        NSCameraUsageDescription: "Alarmy photographs your objects and scans your barcodes to turn off the alarm."
+        NSLocationWhenInUseUsageDescription: "Alarmy reads out the weather for your rough location, if you turn that on for an alarm."
         NSMotionUsageDescription: "Alarmy counts your steps to turn off the alarm."
         NSMicrophoneUsageDescription: "Alarmy never records you. iOS needs this on file to send the alarm to the phone's speaker while earbuds are connected."
         UIRequiresFullScreen: true

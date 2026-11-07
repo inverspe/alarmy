@@ -15,7 +15,7 @@ Success means the owner gets out of bed and stays up. The owner's own expectatio
 
 ## Goals
 
-- Missions per alarm, stacked in any order the owner chooses: **photo of a registered object** (picked at random each morning), **steps**, **squats**, **shake** and **math**. Photo is the default. (Owner changed this from photo only on 2026-11-06.)
+- Missions per alarm, stacked in any order the owner chooses: **photo of a registered object** (picked at random each morning), **steps**, **squats**, **shake**, **math**, **typing**, **barcode** and **memory**. Photo is the default. (Owner changed this from photo only on 2026-11-06, and added the last three on 2026-11-07.)
 - **Keep ringing after the mission** for a configurable time (default 10 minutes), then stop by itself.
 - **Vibrates** once a second while ringing, per alarm, on by default. Not while a mission is open, as that would disturb the motion sensors.
 - **Edit lock**: alarm settings and objects can't be changed during a configurable window before the alarm.
@@ -25,8 +25,6 @@ Success means the owner gets out of bed and stays up. The owner's own expectatio
 
 ## Non-goals
 
-- Other mission types (typing, memory, QR, etc.).
-- Snooze. There is no snooze.
 - App Store distribution, other users, accounts, cloud sync, analytics.
 - iOS 26 AlarmKit (the device is on iOS 16.5.1).
 - Android, iPad, Apple Watch.
@@ -52,7 +50,7 @@ Success means the owner gets out of bed and stays up. The owner's own expectatio
 
 Flow approved by the owner from wireframes (`.superpowers/brainstorm/.../content/morning-flow.html`):
 
-1. **Ringing screen.** Shows the time and "Go find: <Object name>" with that object's reference photo, or the mission to do. No snooze, no stop. The only action is **Open camera** or **Start mission**.
+1. **Ringing screen.** Shows the time and "Go find: <Object name>" with that object's reference photo, or the mission to do. No stop. The action is **Open camera** or **Start mission**, plus **Snooze** if it's turned on for this alarm.
 2. **Camera.** Live viewfinder with the reference photo pinned in a corner, flash toggle, shutter. Camera capture only; picking from the photo library is not allowed.
 3. **Miss.** "Not a match, try again." Stays on the camera, alarm keeps ringing.
 4. **Countdown.** After a match: "Mission done ✓", a countdown ring showing time until it stops, and "You're up. Stay up." The alarm **keeps ringing throughout**. Nothing to tap. When the countdown ends, the alarm stops by itself.
@@ -74,7 +72,7 @@ Flow approved by the owner from wireframes (`.superpowers/brainstorm/.../content
 - Each alarm has an ordered list, with each kind at most once. An alarm can leave photo out, and the editor warns that it could then be finished from bed.
 - All of them must be done, in order. The keep-ringing countdown starts after the last one.
 - **Quiet during missions (per alarm, on by default):** starting a mission stops the sound, without stopping anything else. It stays stopped from one mission to the next. There's a switch on the mission screen for that one ring, which isn't saved. Leaving the app brings the sound back straight away.
-- **20 seconds of nothing:** a bar shows the time left, and any input starts it again: a key, the shutter, or a count. When it runs out the mission closes, the sound comes back and the list starts over from the first mission. Missions keep their place if the app is closed.
+- **20 seconds of nothing** (10 to 50 seconds in Settings): a bar shows the time left, and any input starts it again: a key, the shutter, or a count. When it runs out the mission closes, the sound comes back and the list starts over from the first mission. Missions keep their place if the app is closed.
 - **Steps:** one for each second of movement, not real footsteps, from how much the accelerometer varies. Ten sharp jolts within 3 seconds freezes the count and vibrates, then 1 second later takes off 10 steps, and 1 second after that it carries on. Standing still for 3 seconds gives a nudge at no cost.
 - **Squats:** two fingers held on the screen for 2 seconds start the mission. Then each 2 seconds of movement counts once if the phone is upright with its screen facing the owner and hasn't been twisted about, and it either moved hard enough or a whole down-and-up was seen. Movement that doesn't count gives a vibration. That second way of counting is ours and may need tuning.
 - **Shake:** a sharp change in the accelerometer, at most five a second, at one of five strengths per alarm. Stopping for 3 seconds vibrates and shows "paused", with nothing lost.
@@ -83,6 +81,29 @@ Flow approved by the owner from wireframes (`.superpowers/brainstorm/.../content
 - A photo mission with no usable objects is dropped from the list. If that leaves nothing, the alarm rings for the countdown.
 - A missed wake-up check restarts the whole list.
 - Only alarms with a photo mission need registered objects.
+
+### Typing, barcode and memory missions (owner requested 2026-11-07)
+
+- **Typing:** one sentence per round (1 to 20, default 1), from a kind chosen per alarm or the owner's own list (up to 100, 120 characters each, in Settings). It has to match exactly, apart from curly quotes. A wrong one stays in the box with a message for 2 seconds. Each change starts the time limit again. Sentences are in English and are our own.
+- **Barcode:** barcodes and QR codes are registered on the Objects tab with a name, and each alarm picks one. It takes one scan with the exact code. Anything else shows a message and it keeps looking. The torch can be switched on. A barcode an enabled alarm uses can't be deleted. If the camera is off, or nothing has been scanned in 2 minutes of mission time, a button swaps it for 5 sums.
+- **Memory:** rounds 1 to 99, default 3, on a grid of 3×3 to 7×7, default 3×3. A third of the tiles light up, at most 9. Then they have to be found. A wrong tap flashes red and costs nothing, and every second one shows where the rest are.
+
+### Snooze (owner requested 2026-11-07)
+
+Off unless turned on per alarm, because the owner started out wanting none. When on: 1 to 60 minutes (default 5), and a limit each ring of 1, 2, 3, 5 or 10, or none (default 3).
+
+- The button is on the ringing screen only, showing what's left, and goes away at the limit. It's also gone if the ring would come back past the hard cap.
+- The sound and vibration stop, and backups move to when it ends. The screen shows a countdown and what's left.
+- It doesn't count as doing the mission. "Do my mission now" rings again straight away and opens the mission.
+- The ring afterwards ramps up again if gentle wake-up is on, and a missed wake-up check gives the snoozes back.
+
+### Voice announcements (owner requested 2026-11-07)
+
+Each alarm can say the time, the weather and its label. All off by default.
+
+- After 3 seconds of ringing the sound stops, the lines are read out, and the sound comes back. It repeats 30 seconds later. If iOS doesn't report that the speech has finished within 45 seconds, the sound comes back anyway.
+- The first time includes the day and date. A mission opening stops the speech, and closing one waits 30 seconds to speak again.
+- **Weather:** a rough location, rounded to about a kilometre, is sent to open-meteo.com, which needs no account. It's fetched from 5 minutes before the alarm, and used for 30 minutes. If it can't be fetched the line is left out. Location access is only asked for when the setting is turned on.
 
 ### Clearing early (owner approved)
 

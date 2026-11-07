@@ -61,7 +61,7 @@ public enum BackupPlanner {
             case .mission where session.isRinging:
                 result += nudges(session, now: now) + ring(session, count: perOccurrenceMax, until: nil, now: now)
             case .snoozed(let until):
-                _ = until
+                result += repeatRing(session, from: until.addingTimeInterval(TimeInterval(min(session.gentleSeconds, longestGentleWait))))
             case .countdown(let endsAt) where session.isRinging:
                 let checkAt = session.wakeCheckMinutes > 0
                     ? endsAt.addingTimeInterval(TimeInterval(session.wakeCheckMinutes) * 60) : nil
@@ -94,7 +94,7 @@ public enum BackupPlanner {
     /// Counted from when the ring began. One less than a second away could be too late to schedule.
     private static func nudges(_ session: RingSession, now: Date) -> [PlannedNotification] {
         (0..<nudgeCount)
-            .map { session.occurrence.fireDate.addingTimeInterval(firstNudge + nudgeGap * Double($0)) }
+            .map { session.ringStart.addingTimeInterval(firstNudge + nudgeGap * Double($0)) }
             .filter { $0.timeIntervalSince(now) > 1 }
             .map { PlannedNotification(occurrence: session.occurrence, fireDate: $0, kind: .nudge) }
     }

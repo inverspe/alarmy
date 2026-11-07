@@ -35,6 +35,14 @@ struct AlarmEditView: View {
 
                     DayChips(days: $alarm.repeatDays).padding(.vertical, 10)
 
+                    TextField("", text: $alarm.label, prompt: Text("Label, like Gym").foregroundColor(Theme.dusk))
+                        .font(Theme.body)
+                        .foregroundColor(Theme.moon)
+                        .padding(14)
+                        .background(Theme.nightSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .accessibilityIdentifier("alarm-label")
+
                     field("Sound") {
                         HStack(spacing: 12) {
                             Picker("Sound", selection: $alarm.sound) {
@@ -56,13 +64,49 @@ struct AlarmEditView: View {
 
                     VStack(alignment: .leading, spacing: 0) {
                         toggleField("Quiet during missions", isOn: $alarm.quietDuringMissions)
-                        Text("The sound stops while a mission is open. If nothing happens for 20 seconds, the mission closes, the sound comes back and the missions start over.")
+                        Text("The sound stops while a mission is open. If nothing happens for \(model.state.missionTimeLimit) seconds, the mission closes, the sound comes back and the missions start over.")
                             .font(Theme.caption)
                             .foregroundColor(Theme.dusk)
                             .padding(.vertical, 8)
                     }
                 }
                 .disabled(model.isLocked)
+
+                Group {
+                    toggleField("Snooze", isOn: $alarm.snoozeOn)
+                    if alarm.snoozeOn {
+                        field("Snooze for") {
+                            Picker("Snooze for", selection: $alarm.snoozeMinutes) {
+                                ForEach(Alarm.snoozeMinuteChoices, id: \.self) { Text("\($0) min").tag($0) }
+                            }
+                            .pickerStyle(.menu)
+                            .tint(Theme.dusk)
+                        }
+                        field("Snoozes each ring") {
+                            Picker("Snoozes each ring", selection: $alarm.snoozeLimit) {
+                                ForEach(Alarm.snoozeLimitChoices, id: \.self) { Text($0 < 0 ? "No limit" : "\($0)").tag($0) }
+                            }
+                            .pickerStyle(.menu)
+                            .tint(Theme.dusk)
+                        }
+                    }
+
+                    toggleField("Say the time", isOn: $alarm.voiceTime)
+                    toggleField("Say the label", isOn: $alarm.voiceLabel)
+                    VStack(alignment: .leading, spacing: 0) {
+                        toggleField("Say the weather", isOn: $alarm.voiceWeather)
+                        if alarm.voiceWeather {
+                            Text("Sends your rough location to open-meteo.com to get the forecast.")
+                                .font(Theme.caption)
+                                .foregroundColor(Theme.dusk)
+                                .padding(.vertical, 8)
+                        }
+                    }
+                }
+                .disabled(model.isLocked)
+                .onChange(of: alarm.voiceWeather) { on in
+                    if on { model.askForWeatherLocation() }
+                }
 
                 Group {
                     field("Gentle wake-up") {
@@ -169,9 +213,13 @@ struct AlarmEditView: View {
         if ok {
             dismiss()
         } else {
-            error = model.isLocked
-                ? "Alarms can't be changed right now."
-                : "Add an object first, or remove the photo mission."
+            if model.isLocked {
+                error = "Alarms can't be changed right now."
+            } else if edited.missions.runnable(barcodes: model.state.barcodes).count != edited.missions.count {
+                error = "Choose a barcode, or remove the barcode mission."
+            } else {
+                error = "Add an object first, or remove the photo mission."
+            }
         }
     }
 

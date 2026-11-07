@@ -104,7 +104,7 @@ struct AlarmListView: View {
     }
 
     private func summary(_ alarm: Alarm) -> String {
-        "\(RepeatText.describe(alarm.repeatDays)), rings \(alarm.ringAfterMinutes) min after the mission"
+        (alarm.label.isEmpty ? "" : "\(alarm.label). ") + "\(RepeatText.describe(alarm.repeatDays)), rings \(alarm.ringAfterMinutes) min after the mission"
     }
 }
 
