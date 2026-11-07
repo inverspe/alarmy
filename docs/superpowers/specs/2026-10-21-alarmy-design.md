@@ -146,6 +146,19 @@ Swiping the app closed posts a notification about 2.5 seconds later saying so. T
 - While locked you can't edit, disable, or delete the alarm, change its X or lock settings, or add, remove or change objects. The lock ends when the alarm finishes (countdown complete) or is cleared early.
 - If the alarm is never completed (for example, the phone was powered off), the lock ends at a hard cap so the app can't get stuck locked forever. My call: alarm time + 2 hours.
 
+### Can't turn off (owner requested 2026-11-08)
+
+Off by default, set per alarm.
+
+- While an alarm with this on is switched on, the edit lock holds all the time, not just in the window before it rings. Everything the edit lock covers stays locked, including adding alarms, objects, barcodes and sentences, and the settings.
+- The way out is that alarm's own missions (the owner's choice). The Alarms, Objects and Settings screens offer "Unlock with mission". Nothing rings during it, and "Not now" backs out. Finishing the missions opens everything for 10 minutes. After that it locks again unless the alarm was turned off or the option was switched off.
+- Inside the normal lock window (N hours before the alarm until it's done), the mission doesn't unlock anything, so it can't be used at 3 AM. Only the early clear works there, as before.
+- Unlocking doesn't count as that alarm's ring: it still rings at its time, and a one-time alarm stays on.
+- With several such alarms, the one ringing soonest is the one whose missions unlock.
+- An unlock or early clear in progress gives way at once if any alarm comes due, so it can never delay a ring.
+- A one-time alarm stops holding the lock once it has rung and been finished, because it turns itself off.
+- The option itself can't stop power-off, swiping the app away or deleting the app. iOS doesn't allow that. The existing backups and Screen Time steps still cover those.
+
 ### Uninstall protection
 
 - **Primary (no code):** onboarding walks the owner through iOS Settings → Screen Time → Content & Privacy Restrictions → iTunes & App Store Purchases → **Deleting Apps: Don't Allow**, with a Screen Time passcode they hand to someone else or hide.

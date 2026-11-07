@@ -27,7 +27,7 @@ public enum EditLock {
     /// `lockedUntilDone`, doing that alarm's missions opens it up.
     public static func standingLock(_ alarms: [Alarm], unlockedUntil: Date?, now: Date, calendar: Calendar) -> Occurrence? {
         if let unlockedUntil, now < unlockedUntil { return nil }
-        return Schedule.upcoming(alarms.filter { _ in false }, after: now, calendar: calendar, limit: 1).first
+        return Schedule.upcoming(alarms.filter(\.alwaysLocked), after: now, calendar: calendar, limit: 1).first
     }
 
     /// The upcoming occurrence that can be cleared early right now, if any:

@@ -42,7 +42,7 @@ extension AppState {
     /// alarm to ring as usual. Anything else counts its alarm as done, and a one-time alarm turns off.
     public mutating func finish(_ session: RingSession, at finishedAt: Date, calendar: Calendar) {
         ringSession = nil
-        if session.isUnlock && false {
+        if session.isUnlock {
             unlockedUntil = finishedAt.addingTimeInterval(TimeInterval(EditLock.unlockMinutes) * 60)
             return
         }
@@ -58,7 +58,7 @@ extension AppState {
     public mutating func yieldToDueAlarm(now: Date, calendar: Calendar) {
         guard let session = ringSession, session.isEarlyClear else { return }
         if now >= session.occurrence.fireDate
-            && Schedule.activeOccurrence(alarms, completed: completed, now: now, calendar: calendar) != nil {
+            || Schedule.activeOccurrence(alarms, completed: completed, now: now, calendar: calendar) != nil {
             ringSession = nil
         }
     }
