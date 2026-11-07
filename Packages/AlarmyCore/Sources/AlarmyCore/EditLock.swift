@@ -34,14 +34,14 @@ public enum EditLock {
     /// (after a reboot, when the clock can't be checked) can't bring an old one back.
     public static func isUnlocked(_ until: Date?, now: Date) -> Bool {
         guard let until else { return false }
-        return now < until
+        return now < until && now >= until.addingTimeInterval(-TimeInterval(unlockMinutes) * 60)
     }
 
     /// What has to be done to unlock: the alarm's own missions, without a photo when no object
     /// can be matched, and sums when that leaves nothing, so an unlock is never free.
     public static func unlockMissions(_ missions: [MissionStep], hasObjects: Bool) -> [MissionStep] {
         let doable = hasObjects ? missions : missions.filter { $0.kind != .photo }
-        return missions
+        return doable.isEmpty ? [MissionStep(kind: .math)] : doable
     }
 
     /// The upcoming occurrence that can be cleared early right now, if any:
