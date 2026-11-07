@@ -46,7 +46,7 @@ public struct Alarm: Codable, Identifiable, Equatable {
     public static let snoozeMinuteChoices = [1, 3, 5, 10, 15, 20, 25, 30, 45, 60]
     public static let snoozeLimitChoices = [-1, 1, 2, 3, 5, 10]
 
-    public var voiceIsOn: Bool { voiceTime || voiceWeather || (voiceLabel && !label.isEmpty) }
+    public var voiceIsOn: Bool { voiceTime || voiceWeather || (voiceLabel && !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
     public var needsObjects: Bool { missions.contains { $0.kind == .photo } }
 
     public init(id: UUID = UUID(), hour: Int, minute: Int, repeatDays: Set<Weekday> = [],

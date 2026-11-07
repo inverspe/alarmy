@@ -43,7 +43,7 @@ public struct VoiceCycle: Equatable {
             announcements += 1
             stage = .speaking(since: now, started: false)
             return .speak
-        case .speaking(let since, let started) where now - since >= Self.longestSpeech || started:
+        case .speaking(let since, let started) where now - since >= (started ? Self.longestSpeech : Self.longestWaitToStart):
             stage = .waiting(until: now + Self.repeatDelay)
             return .gaveUp
         default:
@@ -84,7 +84,7 @@ public enum VoiceScript {
             result.append(formatter.string(from: date))
         }
         if let weather, !weather.isEmpty { result.append(weather) }
-        if let label, !label.isEmpty { result.append(label) }
+        if let label, !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { result.append(label) }
         return result
     }
 }
