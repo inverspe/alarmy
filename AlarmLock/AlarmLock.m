@@ -107,24 +107,32 @@ static void ALRelock(void) {
 @protocol ALRealmClassLike <NSObject>
 + (nullable id)realmWithConfiguration:(id)configuration error:(NSError *__autoreleasing *)error;
 @end
+@protocol ALConfigLike <NSObject>
+- (nullable NSURL *)fileURL;
+@end
 
 static NSString *const ALAlarmClassName = @"AlarmEntity";
-static id ALAlarmConfig;
+/// Every database file Alarmy has opened whose layout includes alarms, by path. An app can keep
+/// several files that all know the alarm layout, so all of them are read and combined.
+static NSMutableDictionary<NSString *, id> *ALAlarmConfigs;
 static NSObject *ALConfigLock;
+static const NSUInteger ALMaxConfigs = 8;
 
 static void ALNoteRealm(id realm) {
     if (!realm) return;
-    @synchronized (ALConfigLock) {
-        if (ALAlarmConfig) return;
-    }
     @try {
+        id config = [(id<ALRealmLike>)realm configuration];
+        NSString *path = [(id<ALConfigLike>)config fileURL].path;
+        if (path.length == 0) return; // in memory only, gone when closed
+        @synchronized (ALConfigLock) {
+            if (ALAlarmConfigs[path] || ALAlarmConfigs.count >= ALMaxConfigs) return;
+        }
         id<ALSchemaLike> schema = [(id<ALRealmLike>)realm schema];
         if (![schema schemaForClassName:ALAlarmClassName]) return;
-        id config = [[(id<ALRealmLike>)realm configuration] copy];
         @synchronized (ALConfigLock) {
-            if (!ALAlarmConfig) {
-                ALAlarmConfig = config;
-                ALLog(@"found Alarmy's alarm database");
+            if (!ALAlarmConfigs[path] && ALAlarmConfigs.count < ALMaxConfigs) {
+                ALAlarmConfigs[path] = [config copy];
+                ALLog(@"found a database with alarms: %@", path.lastPathComponent);
             }
         }
     } @catch (NSException *e) {
@@ -160,19 +168,16 @@ static id ALOpen(id cls, SEL sel, id config, NSError *__autoreleasing *error) {
 }
 
 static NSString *ALReadProblem;
+/// What the last read found, shown on the cover so a screenshot says whether reading works.
+static NSString *ALReadSummary;
 
-/// Nil when the alarms can't be read; ALReadProblem then says why.
-static NSArray<ALAlarmRecord *> *ALReadAlarms(void) {
-    id config;
-    @synchronized (ALConfigLock) { config = ALAlarmConfig; }
-    Class realmClass = NSClassFromString(@"RLMRealm");
-    if (!realmClass) { ALReadProblem = @"Alarmy's database library isn't there."; return nil; }
-    if (!config) { ALReadProblem = @"Alarmy hasn't opened its alarms yet."; return nil; }
+/// The alarms in one database file. Nil when it can't be read; `problem` then says why.
+static NSArray<ALAlarmRecord *> *ALReadAlarmsIn(Class realmClass, id config, NSString **problem) {
     @try {
         NSError *error = nil;
         id realm = [(Class<ALRealmClassLike>)realmClass realmWithConfiguration:config error:&error];
         if (!realm) {
-            ALReadProblem = [NSString stringWithFormat:@"Couldn't open Alarmy's alarms (%@).", error.localizedDescription ?: @"no reason given"];
+            *problem = [NSString stringWithFormat:@"Couldn't open Alarmy's alarms (%@).", error.localizedDescription ?: @"no reason given"];
             return nil;
         }
         id<ALResultsLike> results = [(id<ALRealmLike>)realm allObjects:ALAlarmClassName];
@@ -186,12 +191,39 @@ static NSArray<ALAlarmRecord *> *ALReadAlarms(void) {
                                                 hour:[[object valueForKey:@"hour"] integerValue]
                                               minute:[[object valueForKey:@"minute"] integerValue]]];
         }
-        ALReadProblem = nil;
         return alarms;
     } @catch (NSException *e) {
-        ALReadProblem = [NSString stringWithFormat:@"Couldn't read Alarmy's alarms (%@).", e.reason ?: e.name];
+        *problem = [NSString stringWithFormat:@"Couldn't read Alarmy's alarms (%@).", e.reason ?: e.name];
         return nil;
     }
+}
+
+/// Every alarm in every database file that has them. Nil when none could be read; ALReadProblem
+/// then says why.
+static NSArray<ALAlarmRecord *> *ALReadAlarms(void) {
+    NSArray *configs;
+    @synchronized (ALConfigLock) { configs = ALAlarmConfigs.allValues; }
+    Class realmClass = NSClassFromString(@"RLMRealm");
+    if (!realmClass) { ALReadProblem = @"Alarmy's database library isn't there."; return nil; }
+    if (configs.count == 0) { ALReadProblem = @"Alarmy hasn't opened its alarms yet."; return nil; }
+
+    NSMutableArray<ALAlarmRecord *> *all = [NSMutableArray array];
+    NSString *problem = nil;
+    NSUInteger readable = 0;
+    for (id config in configs) {
+        NSArray<ALAlarmRecord *> *alarms = ALReadAlarmsIn(realmClass, config, &problem);
+        if (!alarms) continue;
+        readable += 1;
+        [all addObjectsFromArray:alarms];
+    }
+    if (readable == 0) { ALReadProblem = problem; return nil; }
+    NSUInteger on = 0;
+    for (ALAlarmRecord *alarm in all) if (alarm.enabled) on += 1;
+    ALReadSummary = [NSString stringWithFormat:@"Read %lu alarm%@ (%lu on) from %lu file%@.",
+                     (unsigned long)all.count, all.count == 1 ? @"" : @"s", (unsigned long)on,
+                     (unsigned long)readable, readable == 1 ? @"" : @"s"];
+    ALReadProblem = on == 0 ? @"No alarms that are on were found." : nil;
+    return all;
 }
 
 static NSDate *ALCachedNext;
@@ -228,6 +260,7 @@ static NSString *ALHoursText(NSInteger hours) {
     UILabel *_problem;
     UILabel *_feedback;
     UITextField *_answer;
+    BOOL _finished;
 }
 
 - (void)viewDidLoad {
@@ -327,6 +360,8 @@ static NSString *ALHoursText(NSInteger hours) {
 }
 
 - (void)finish:(BOOL)solved {
+    if (_finished) return; // a second tap while closing
+    _finished = YES;
     void (^done)(BOOL) = self.onDone;
     self.onDone = nil;
     [_answer resignFirstResponder];
@@ -444,11 +479,13 @@ static NSString *ALHoursText(NSInteger hours) {
     [view addSubview:_pill];
 
     UILayoutGuide *safe = view.safeAreaLayoutGuide;
+    // If the screen itself scrolls, pin to its visible frame so the cover can't scroll away.
+    UILayoutGuide *frame = [view isKindOfClass:UIScrollView.class] ? ((UIScrollView *)view).frameLayoutGuide : nil;
     [NSLayoutConstraint activateConstraints:@[
-        [_cover.topAnchor constraintEqualToAnchor:view.topAnchor],
-        [_cover.bottomAnchor constraintEqualToAnchor:view.bottomAnchor],
-        [_cover.leadingAnchor constraintEqualToAnchor:view.leadingAnchor],
-        [_cover.trailingAnchor constraintEqualToAnchor:view.trailingAnchor],
+        [_cover.topAnchor constraintEqualToAnchor:(frame ? frame.topAnchor : view.topAnchor)],
+        [_cover.bottomAnchor constraintEqualToAnchor:(frame ? frame.bottomAnchor : view.bottomAnchor)],
+        [_cover.leadingAnchor constraintEqualToAnchor:(frame ? frame.leadingAnchor : view.leadingAnchor)],
+        [_cover.trailingAnchor constraintEqualToAnchor:(frame ? frame.trailingAnchor : view.trailingAnchor)],
         [blur.topAnchor constraintEqualToAnchor:_cover.topAnchor],
         [blur.bottomAnchor constraintEqualToAnchor:_cover.bottomAnchor],
         [blur.leadingAnchor constraintEqualToAnchor:_cover.leadingAnchor],
@@ -500,6 +537,7 @@ static NSString *ALHoursText(NSInteger hours) {
             [lines addObject:[NSString stringWithFormat:@"%@ The hours-before rule is off until it can.", ALReadProblem]];
         }
         [lines addObject:@"Emergency escape is off while the lock is on."];
+        if (ALReadSummary) [lines addObject:ALReadSummary];
         _note.text = [lines componentsJoinedByString:@"\n"];
     }
 
@@ -673,6 +711,7 @@ static UIView *ALEscapeHitTest(UIView *self, SEL sel, CGPoint point, UIEvent *ev
 __attribute__((constructor)) static void ALStart(void) {
     @autoreleasepool {
         ALConfigLock = [NSObject new];
+        ALAlarmConfigs = [NSMutableDictionary dictionary];
 
         Class realm = objc_getClass("RLMRealm");
         if (realm) {
