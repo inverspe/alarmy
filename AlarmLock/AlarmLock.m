@@ -16,6 +16,8 @@ static NSString *const ALKeyHours = @"AlarmLock.hoursBefore";
 static NSString *const ALKeyUntil = @"AlarmLock.unlockedUntil";
 static NSString *const ALKeyUntilBoot = @"AlarmLock.unlockedBoot";
 static NSString *const ALKeyAnchor = @"AlarmLock.clockAnchor";
+/// When an alarm last finished: it rang and its missions were done.
+static NSString *const ALKeyDoneAt = @"AlarmLock.alarmDoneAt";
 
 static NSUserDefaults *ALDefaults(void) { return NSUserDefaults.standardUserDefaults; }
 static BOOL ALLockOn(void) { return [ALDefaults() boolForKey:ALKeyOn]; }
@@ -84,6 +86,7 @@ static void ALGrantUnlock(NSDate *now) {
 }
 
 static void ALRelock(void) {
+    [ALDefaults() removeObjectForKey:ALKeyDoneAt];
     [ALDefaults() removeObjectForKey:ALKeyUntil];
     [ALDefaults() removeObjectForKey:ALKeyUntilBoot];
 }
@@ -238,8 +241,22 @@ static NSDate *ALNextAlarmAt(NSDate *now, BOOL fresh) {
     return ALCachedNext;
 }
 
+static NSDate *ALDoneAt(void) {
+    id value = [ALDefaults() objectForKey:ALKeyDoneAt];
+    return [value isKindOfClass:NSNumber.class] ? [NSDate dateWithTimeIntervalSince1970:[value doubleValue]] : nil;
+}
+
+/// Until when the lock is open, by sums or because the last alarm was finished. Nil when it is not.
+static NSDate *ALOpenUntil(NSDate *now, NSDate *next) {
+    NSDate *bySums = ALUnlockedAt(now) ? ALUnlockedUntil() : nil;
+    NSDate *byAlarm = ALOpenAfterAlarmUntil(ALDoneAt(), ALHours(), next, now);
+    if (bySums && byAlarm) return [bySums laterDate:byAlarm];
+    return bySums ?: byAlarm;
+}
+
 static ALLockState ALStateAt(NSDate *now, BOOL fresh) {
-    return ALLockStateAt(ALLockOn(), ALHours(), ALNextAlarmAt(now, fresh), ALUnlockedAt(now), now);
+    NSDate *next = ALNextAlarmAt(now, fresh);
+    return ALLockStateAt(ALLockOn(), ALHours(), next, ALOpenUntil(now, next) != nil, now);
 }
 
 static NSString *ALHoursText(NSInteger hours) {
@@ -546,7 +563,7 @@ static NSString *ALHoursText(NSInteger hours) {
         title = @"Lock alarms";
         [_pill setImage:[UIImage systemImageNamed:@"lock.fill"] forState:UIControlStateNormal];
     } else {
-        title = [NSString stringWithFormat:@"Unlocked until %@", ALTime(ALUnlockedUntil() ?: now)];
+        title = [NSString stringWithFormat:@"Unlocked until %@", ALTime(ALOpenUntil(now, ALCachedNext) ?: now)];
         [_pill setImage:[UIImage systemImageNamed:@"lock.open.fill"] forState:UIControlStateNormal];
     }
     NSString *shown = [@" " stringByAppendingString:title];
@@ -708,6 +725,49 @@ static UIView *ALEscapeHitTest(UIView *self, SEL sel, CGPoint point, UIEvent *ev
     return ALOrigEscapeHitTest(self, sel, point, event);
 }
 
+// Alarmy's ringing screen. Its mission preview is a subclass, which must not count as a real ring.
+static Class ALPreviewClass;
+static BOOL ALRingShown;
+typedef void (*ALDeallocFn)(__unsafe_unretained id, SEL);
+
+static BOOL ALIsRealRing(__unsafe_unretained id controller) {
+    return !(ALPreviewClass && [controller isKindOfClass:ALPreviewClass]);
+}
+
+/// A ring has started: the lock closes again at once, so snoozing can't be used to get in.
+static void ALRingStarted(void) {
+    ALRingShown = YES;
+    [ALDefaults() removeObjectForKey:ALKeyDoneAt];
+    ALLog(@"alarm ringing, lock closed");
+}
+
+/// The ringing screen has gone for good: the alarm rang and its missions were done.
+static void ALRingEnded(void) {
+    if (!ALRingShown) return;
+    ALRingShown = NO;
+    [ALDefaults() setObject:@(ALNow().timeIntervalSince1970) forKey:ALKeyDoneAt];
+    ALLog(@"alarm finished, lock open until the next alarm's window");
+}
+
+static ALBoolFn ALOrigRingDidAppear;
+static void ALRingDidAppear(UIViewController *self, SEL sel, BOOL animated) {
+    ALOrigRingDidAppear(self, sel, animated);
+    if (ALIsRealRing(self)) ALRingStarted();
+}
+
+static ALBoolFn ALOrigRingDidDisappear;
+static void ALRingDidDisappear(UIViewController *self, SEL sel, BOOL animated) {
+    ALOrigRingDidDisappear(self, sel, animated);
+    // Only when it is really going away. An ad or another screen shown on top doesn't count.
+    if (ALIsRealRing(self) && (self.isBeingDismissed || self.isMovingFromParentViewController)) ALRingEnded();
+}
+
+static ALDeallocFn ALOrigRingDealloc;
+static void ALRingDealloc(__unsafe_unretained id self, SEL sel) {
+    if (ALIsRealRing(self)) ALRingEnded();
+    ALOrigRingDealloc(self, sel);
+}
+
 __attribute__((constructor)) static void ALStart(void) {
     @autoreleasepool {
         ALConfigLock = [NSObject new];
@@ -729,6 +789,16 @@ __attribute__((constructor)) static void ALStart(void) {
             ALOrigHomeDidAppear = (ALBoolFn)ALReplace(home, @selector(viewDidAppear:), (IMP)ALHomeDidAppear);
         } else {
             ALLog(@"no Alarms tab class, nothing will be locked");
+        }
+
+        Class ring = objc_getClass("_TtC6Alarmy24AlarmContainerController");
+        ALPreviewClass = objc_getClass("_TtC6Alarmy26PreviewContainerController");
+        if (ring) {
+            ALOrigRingDidAppear = (ALBoolFn)ALReplace(ring, @selector(viewDidAppear:), (IMP)ALRingDidAppear);
+            ALOrigRingDidDisappear = (ALBoolFn)ALReplace(ring, @selector(viewDidDisappear:), (IMP)ALRingDidDisappear);
+            ALOrigRingDealloc = (ALDeallocFn)ALReplace(ring, NSSelectorFromString(@"dealloc"), (IMP)ALRingDealloc);
+        } else {
+            ALLog(@"no ringing screen class, the lock won't open after alarms");
         }
 
         Class escape = objc_getClass("_TtC6Alarmy27EmergencyEscapeEntryOverlay");

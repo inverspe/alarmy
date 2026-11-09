@@ -22,6 +22,15 @@ BOOL ALIsUnlocked(NSDate *until, NSString *untilBoot, NSString *boot, NSDate *no
     return t < end && t >= end - ALUnlockSeconds;
 }
 
+NSDate *ALOpenAfterAlarmUntil(NSDate *doneAt, NSInteger hoursBefore, NSDate *nextAlarm, NSDate *now) {
+    if (!doneAt || [now compare:doneAt] == NSOrderedAscending) return nil;
+    NSDate *end;
+    if (!nextAlarm) end = [doneAt dateByAddingTimeInterval:12 * 3600];
+    else if (hoursBefore > 0) end = [nextAlarm dateByAddingTimeInterval:-(NSTimeInterval)hoursBefore * 3600];
+    else end = nextAlarm;
+    return [now compare:end] == NSOrderedAscending ? end : nil;
+}
+
 BOOL ALIsSealed(NSInteger hoursBefore, NSDate *nextAlarm, NSDate *now) {
     if (hoursBefore <= 0 || !nextAlarm) return NO;
     NSTimeInterval t = now.timeIntervalSince1970, fire = nextAlarm.timeIntervalSince1970;

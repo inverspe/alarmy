@@ -57,6 +57,18 @@ static void testStates(void) {
     CHECK(ALLockStateAt(YES, 0, alarm, NO, D(@"2026-10-21 06:59")) == ALLockStateLocked, "0 hours: sums work up to the alarm");
 }
 
+static void testOpenAfterAlarm(void) {
+    NSDate *done = D(@"2026-10-21 07:10"), *next = D(@"2026-10-22 07:00");
+    CHECK([ALOpenAfterAlarmUntil(done, 3, next, D(@"2026-10-21 07:11")) isEqualToDate:D(@"2026-10-22 04:00")], "open until 3 h before the next alarm");
+    CHECK(ALOpenAfterAlarmUntil(done, 3, next, D(@"2026-10-22 04:00")) == nil, "locks again when the window starts");
+    CHECK([ALOpenAfterAlarmUntil(done, 0, next, D(@"2026-10-21 12:00")) isEqualToDate:next], "0 hours: open until the next alarm rings");
+    CHECK([ALOpenAfterAlarmUntil(done, 3, nil, D(@"2026-10-21 12:00")) isEqualToDate:D(@"2026-10-21 19:10")], "next alarm unknown: 12 hours");
+    CHECK(ALOpenAfterAlarmUntil(done, 3, nil, D(@"2026-10-21 19:10")) == nil, "and then locked");
+    CHECK(ALOpenAfterAlarmUntil(nil, 3, next, D(@"2026-10-21 12:00")) == nil, "no alarm finished");
+    CHECK(ALOpenAfterAlarmUntil(done, 3, next, D(@"2026-10-21 07:00")) == nil, "clock turned back before it finished");
+    CHECK(ALOpenAfterAlarmUntil(done, 3, D(@"2026-10-21 08:00"), D(@"2026-10-21 07:11")) == nil, "another alarm soon keeps it locked");
+}
+
 static void testNextAlarm(void) {
     NSDate *now = D(@"2026-10-21 12:00");
     NSArray *alarms = @[
@@ -113,6 +125,7 @@ int main(void) {
         testSealedWindow();
         testUnlockWindow();
         testStates();
+        testOpenAfterAlarm();
         testNextAlarm();
         testTrustedClock();
         testSums();

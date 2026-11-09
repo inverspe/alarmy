@@ -25,6 +25,11 @@ extern NSArray<NSNumber *> *ALHourChoices(void);
 /// clock back or restarting the phone can't bring an old one back.
 BOOL ALIsUnlocked(NSDate *_Nullable until, NSString *_Nullable untilBoot, NSString *_Nullable boot, NSDate *now);
 
+/// After an alarm has rung and its missions were done (`doneAt`), the lock stays open until the
+/// hours before the next alarm begin, or until the next alarm rings when that is 0 hours. If the next
+/// alarm is unknown it stays open for 12 hours. Nil when not open this way.
+NSDate *_Nullable ALOpenAfterAlarmUntil(NSDate *_Nullable doneAt, NSInteger hoursBefore, NSDate *_Nullable nextAlarm, NSDate *now);
+
 /// Inside the hours before the next alarm.
 BOOL ALIsSealed(NSInteger hoursBefore, NSDate *_Nullable nextAlarm, NSDate *now);
 
