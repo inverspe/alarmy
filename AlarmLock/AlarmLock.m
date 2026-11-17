@@ -1,6 +1,9 @@
-// AlarmLock: an add-on for the owner's own copy of Alarmy. While the lock is on, the Alarms tab is
-// covered, so alarms can't be turned off, deleted or changed, and Alarmy's emergency escape is
-// hidden. Three sums open it for 10 minutes, except in the chosen hours before the next alarm.
+// AlarmLock: an add-on for the owner's own copy of Alarmy.
+// - Lock: while it's on, the Alarms tab is covered, so alarms can't be turned off, deleted or
+//   changed, and Alarmy's emergency escape is hidden. Only finishing an alarm (it rang and its
+//   missions were done) opens it, until the chosen hours before the next alarm.
+// - Mission delay: for a chosen number of minutes after an alarm goes off, the ringing screen is
+//   covered, so the alarm keeps ringing and the missions can't start yet.
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <sys/sysctl.h>
@@ -13,18 +16,36 @@
 
 static NSString *const ALKeyOn = @"AlarmLock.on";
 static NSString *const ALKeyHours = @"AlarmLock.hoursBefore";
-static NSString *const ALKeyUntil = @"AlarmLock.unlockedUntil";
-static NSString *const ALKeyUntilBoot = @"AlarmLock.unlockedBoot";
+static NSString *const ALKeyDelay = @"AlarmLock.missionDelayMinutes";
 static NSString *const ALKeyAnchor = @"AlarmLock.clockAnchor";
-/// When an alarm last finished: it rang and its missions were done.
+/// When an alarm last finished (or the lock was turned on): it rang and its missions were done.
 static NSString *const ALKeyDoneAt = @"AlarmLock.alarmDoneAt";
+/// The last sign that alarms are working, for the safety release.
+static NSString *const ALKeyActivity = @"AlarmLock.lastActivity";
+/// When the alarm that is ringing went off, for the mission delay.
+static NSString *const ALKeyRingStart = @"AlarmLock.ringStart";
 
 static NSUserDefaults *ALDefaults(void) { return NSUserDefaults.standardUserDefaults; }
 static BOOL ALLockOn(void) { return [ALDefaults() boolForKey:ALKeyOn]; }
 
 static NSInteger ALHours(void) {
     id value = [ALDefaults() objectForKey:ALKeyHours];
-    return [value isKindOfClass:NSNumber.class] ? [value integerValue] : 3;
+    NSInteger hours = [value isKindOfClass:NSNumber.class] ? [value integerValue] : 3;
+    return hours > 0 ? hours : 3;
+}
+
+static NSInteger ALDelay(void) {
+    return MAX(0, MIN([ALDefaults() integerForKey:ALKeyDelay], ALMaxDelayMinutes));
+}
+
+static NSDate *ALDateFor(NSString *key) {
+    id value = [ALDefaults() objectForKey:key];
+    return [value isKindOfClass:NSNumber.class] ? [NSDate dateWithTimeIntervalSince1970:[value doubleValue]] : nil;
+}
+
+static void ALSetDate(NSString *key, NSDate *date) {
+    if (date) [ALDefaults() setObject:@(date.timeIntervalSince1970) forKey:key];
+    else [ALDefaults() removeObjectForKey:key];
 }
 
 #pragma mark - Clock
@@ -68,33 +89,20 @@ static NSString *ALTime(NSDate *date) {
     return [formatter stringFromDate:date];
 }
 
-#pragma mark - Unlocking
-
-static NSDate *ALUnlockedUntil(void) {
-    id value = [ALDefaults() objectForKey:ALKeyUntil];
-    return [value isKindOfClass:NSNumber.class] ? [NSDate dateWithTimeIntervalSince1970:[value doubleValue]] : nil;
-}
-
-static BOOL ALUnlockedAt(NSDate *now) {
-    return ALIsUnlocked(ALUnlockedUntil(), [ALDefaults() stringForKey:ALKeyUntilBoot], ALBootID(), now);
-}
-
-static void ALGrantUnlock(NSDate *now) {
-    [ALDefaults() setObject:@(now.timeIntervalSince1970 + ALUnlockSeconds) forKey:ALKeyUntil];
-    [ALDefaults() setObject:(ALBootID() ?: @"") forKey:ALKeyUntilBoot];
-    ALLog(@"unlocked for %d min", (int)(ALUnlockSeconds / 60));
-}
-
-static void ALRelock(void) {
-    [ALDefaults() removeObjectForKey:ALKeyDoneAt];
-    [ALDefaults() removeObjectForKey:ALKeyUntil];
-    [ALDefaults() removeObjectForKey:ALKeyUntilBoot];
+static NSString *ALDayAndTime(NSDate *date) {
+    static NSDateFormatter *formatter;
+    if (!formatter) {
+        formatter = [NSDateFormatter new];
+        formatter.dateFormat = [NSDateFormatter dateFormatFromTemplate:@"EEEjmm" options:0 locale:NSLocale.currentLocale];
+    }
+    return [formatter stringFromDate:date];
 }
 
 #pragma mark - Reading Alarmy's alarms
 
 // Alarmy keeps its alarms in a Realm database. The add-on remembers the settings Alarmy opens it
-// with, and opens it the same way to read when the next alarm is due. Nothing is ever written.
+// with, and opens it the same way to read when alarms are due and when they went off. Nothing is
+// ever written.
 @protocol ALRealmLike <NSObject>
 - (id)schema;
 - (id)configuration;
@@ -148,6 +156,7 @@ typedef id (*ALOpenOneFn)(id, SEL, id, NSError *__autoreleasing *);
 typedef void (*ALVoidFn)(id, SEL);
 typedef void (*ALBoolFn)(id, SEL, BOOL);
 typedef UIView *(*ALHitTestFn)(id, SEL, CGPoint, UIEvent *);
+typedef void (*ALDeallocFn)(__unsafe_unretained id, SEL);
 
 static ALOpenTwoFn ALOrigOpenQueue;
 static id ALOpenQueue(id cls, SEL sel, id config, id queue, NSError *__autoreleasing *error) {
@@ -173,6 +182,17 @@ static id ALOpen(id cls, SEL sel, id config, NSError *__autoreleasing *error) {
 static NSString *ALReadProblem;
 /// What the last read found, shown on the cover so a screenshot says whether reading works.
 static NSString *ALReadSummary;
+/// The alarms were read and none is on.
+static BOOL ALNoAlarmsOn;
+
+static NSDate *ALDateValue(id object, NSString *key) {
+    @try {
+        id value = [object valueForKey:key];
+        return [value isKindOfClass:NSDate.class] ? value : nil;
+    } @catch (__unused NSException *e) {
+        return nil; // a field this version of Alarmy doesn't have
+    }
+}
 
 /// The alarms in one database file. Nil when it can't be read; `problem` then says why.
 static NSArray<ALAlarmRecord *> *ALReadAlarmsIn(Class realmClass, id config, NSString **problem) {
@@ -188,11 +208,12 @@ static NSArray<ALAlarmRecord *> *ALReadAlarmsIn(Class realmClass, id config, NSS
         NSUInteger count = results.count;
         for (NSUInteger i = 0; i < count; i++) {
             id object = [results objectAtIndex:i];
-            id next = [object valueForKey:@"nextFireDate"];
-            [alarms addObject:[ALAlarmRecord enabled:[[object valueForKey:@"enabled"] boolValue]
-                                                next:([next isKindOfClass:NSDate.class] ? next : nil)
-                                                hour:[[object valueForKey:@"hour"] integerValue]
-                                              minute:[[object valueForKey:@"minute"] integerValue]]];
+            ALAlarmRecord *alarm = [ALAlarmRecord enabled:[[object valueForKey:@"enabled"] boolValue]
+                                                     next:ALDateValue(object, @"nextFireDate")
+                                                     hour:[[object valueForKey:@"hour"] integerValue]
+                                                   minute:[[object valueForKey:@"minute"] integerValue]];
+            alarm.lastFiredDate = ALDateValue(object, @"lastFiredDate");
+            [alarms addObject:alarm];
         }
         return alarms;
     } @catch (NSException *e) {
@@ -207,6 +228,7 @@ static NSArray<ALAlarmRecord *> *ALReadAlarms(void) {
     NSArray *configs;
     @synchronized (ALConfigLock) { configs = ALAlarmConfigs.allValues; }
     Class realmClass = NSClassFromString(@"RLMRealm");
+    ALNoAlarmsOn = NO;
     if (!realmClass) { ALReadProblem = @"Alarmy's database library isn't there."; return nil; }
     if (configs.count == 0) { ALReadProblem = @"Alarmy hasn't opened its alarms yet."; return nil; }
 
@@ -226,6 +248,7 @@ static NSArray<ALAlarmRecord *> *ALReadAlarms(void) {
                      (unsigned long)all.count, all.count == 1 ? @"" : @"s", (unsigned long)on,
                      (unsigned long)readable, readable == 1 ? @"" : @"s"];
     ALReadProblem = on == 0 ? @"No alarms that are on were found." : nil;
+    ALNoAlarmsOn = on == 0;
     return all;
 }
 
@@ -241,153 +264,47 @@ static NSDate *ALNextAlarmAt(NSDate *now, BOOL fresh) {
     return ALCachedNext;
 }
 
-static NSDate *ALDoneAt(void) {
-    id value = [ALDefaults() objectForKey:ALKeyDoneAt];
-    return [value isKindOfClass:NSNumber.class] ? [NSDate dateWithTimeIntervalSince1970:[value doubleValue]] : nil;
-}
+#pragma mark - The lock's state
 
-/// Until when the lock is open, by sums or because the last alarm was finished. Nil when it is not.
+/// Until when the lock is open because the last alarm was finished (or it was just turned on).
 static NSDate *ALOpenUntil(NSDate *now, NSDate *next) {
-    NSDate *bySums = ALUnlockedAt(now) ? ALUnlockedUntil() : nil;
-    NSDate *byAlarm = ALOpenAfterAlarmUntil(ALDoneAt(), ALHours(), next, now);
-    if (bySums && byAlarm) return [bySums laterDate:byAlarm];
-    return bySums ?: byAlarm;
+    return ALOpenAfterAlarmUntil(ALDateFor(ALKeyDoneAt), ALHours(), next, now);
 }
 
 static ALLockState ALStateAt(NSDate *now, BOOL fresh) {
     NSDate *next = ALNextAlarmAt(now, fresh);
-    return ALLockStateAt(ALLockOn(), ALHours(), next, ALOpenUntil(now, next) != nil, now);
+    if (ALLockOn() && !ALDateFor(ALKeyActivity)) ALSetDate(ALKeyActivity, now);
+    return ALLockStateAt(ALLockOn(), ALOpenUntil(now, next), ALNoAlarmsOn, ALDateFor(ALKeyActivity), now);
+}
+
+/// Turning the lock on counts as an alarm just finished: open until the hours before the next alarm.
+static void ALTurnOn(NSDate *now) {
+    [ALDefaults() setBool:YES forKey:ALKeyOn];
+    ALSetDate(ALKeyDoneAt, now);
+    ALSetDate(ALKeyActivity, now);
+    ALLog(@"lock turned on, locks %ld h before an alarm", (long)ALHours());
+}
+
+static void ALLockNow(NSDate *now) {
+    ALSetDate(ALKeyDoneAt, nil);
+    ALSetDate(ALKeyActivity, now);
+    ALLog(@"locked now");
+}
+
+static void ALTurnOff(void) {
+    [ALDefaults() setBool:NO forKey:ALKeyOn];
+    ALSetDate(ALKeyDoneAt, nil);
+    ALLog(@"lock turned off");
 }
 
 static NSString *ALHoursText(NSInteger hours) {
-    if (hours <= 0) return @"never";
-    return hours == 1 ? @"1 hour before an alarm" : [NSString stringWithFormat:@"%ld hours before an alarm", (long)hours];
+    return hours == 1 ? @"1 hour" : [NSString stringWithFormat:@"%ld hours", (long)hours];
 }
 
-#pragma mark - Sums
-
-@interface ALSumsViewController : UIViewController <UITextFieldDelegate>
-@property (nonatomic, copy) void (^onDone)(BOOL solved);
-@end
-
-@implementation ALSumsViewController {
-    ALSum _sum;
-    NSInteger _done;
-    UILabel *_position;
-    UILabel *_problem;
-    UILabel *_feedback;
-    UITextField *_answer;
-    BOOL _finished;
+static NSString *ALDelayText(NSInteger minutes) {
+    if (minutes <= 0) return @"off";
+    return minutes == 1 ? @"1 minute" : [NSString stringWithFormat:@"%ld minutes", (long)minutes];
 }
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.view.backgroundColor = UIColor.systemBackgroundColor;
-
-    _position = [UILabel new];
-    _position.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
-    _position.textColor = UIColor.secondaryLabelColor;
-
-    _problem = [UILabel new];
-    _problem.font = [UIFont monospacedDigitSystemFontOfSize:44 weight:UIFontWeightBold];
-    _problem.adjustsFontSizeToFitWidth = YES;
-    _problem.minimumScaleFactor = 0.5;
-    _problem.accessibilityIdentifier = @"alarmlock-problem";
-
-    _answer = [UITextField new];
-    _answer.keyboardType = UIKeyboardTypeNumberPad;
-    _answer.font = [UIFont monospacedDigitSystemFontOfSize:34 weight:UIFontWeightSemibold];
-    _answer.borderStyle = UITextBorderStyleRoundedRect;
-    _answer.placeholder = @"Answer";
-    _answer.delegate = self;
-    [_answer.heightAnchor constraintEqualToConstant:60].active = YES;
-
-    _feedback = [UILabel new];
-    _feedback.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    _feedback.textColor = UIColor.systemRedColor;
-    _feedback.numberOfLines = 0;
-
-    UIButton *check = [UIButton buttonWithType:UIButtonTypeSystem];
-    [check setTitle:@"Check" forState:UIControlStateNormal];
-    check.titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
-    check.backgroundColor = UIColor.systemYellowColor;
-    [check setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
-    check.layer.cornerRadius = 14;
-    [check.heightAnchor constraintEqualToConstant:56].active = YES;
-    [check addTarget:self action:@selector(check) forControlEvents:UIControlEventTouchUpInside];
-
-    UIButton *cancel = [UIButton buttonWithType:UIButtonTypeSystem];
-    [cancel setTitle:@"Not now" forState:UIControlStateNormal];
-    cancel.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
-    [cancel addTarget:self action:@selector(cancel) forControlEvents:UIControlEventTouchUpInside];
-
-    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[_position, _problem, _answer, _feedback, check, cancel]];
-    stack.axis = UILayoutConstraintAxisVertical;
-    stack.spacing = 16;
-    stack.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:stack];
-    UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
-    [NSLayoutConstraint activateConstraints:@[
-        [stack.topAnchor constraintEqualToAnchor:safe.topAnchor constant:24],
-        [stack.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:24],
-        [stack.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-24],
-    ]];
-
-    [self nextSum];
-}
-
-- (void)viewDidAppear:(BOOL)animated {
-    [super viewDidAppear:animated];
-    [_answer becomeFirstResponder];
-}
-
-- (void)nextSum {
-    _sum = ALMakeSum(arc4random_uniform);
-    _position.text = [NSString stringWithFormat:@"Sum %ld of %ld", (long)(_done + 1), (long)ALSumsPerUnlock];
-    _problem.text = [NSString stringWithFormat:@"%ld × %ld + %ld", (long)_sum.a, (long)_sum.b, (long)_sum.c];
-    _answer.text = @"";
-    _feedback.text = nil;
-}
-
-- (BOOL)textFieldShouldReturn:(UITextField *)textField {
-    [self check];
-    return NO;
-}
-
-- (void)check {
-    NSString *typed = [_answer.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-    if (typed.length == 0) return;
-    if (typed.integerValue != ALSumAnswer(_sum) || typed.length > 6) {
-        _feedback.text = @"Not right. Try again.";
-        _answer.text = @"";
-        [[UINotificationFeedbackGenerator new] notificationOccurred:UINotificationFeedbackTypeError];
-        return;
-    }
-    _done += 1;
-    if (_done < ALSumsPerUnlock) {
-        [[UINotificationFeedbackGenerator new] notificationOccurred:UINotificationFeedbackTypeSuccess];
-        [self nextSum];
-        return;
-    }
-    [self finish:YES];
-}
-
-- (void)cancel {
-    [self finish:NO];
-}
-
-- (void)finish:(BOOL)solved {
-    if (_finished) return; // a second tap while closing
-    _finished = YES;
-    void (^done)(BOOL) = self.onDone;
-    self.onDone = nil;
-    [_answer resignFirstResponder];
-    [self.presentingViewController dismissViewControllerAnimated:YES completion:^{
-        if (done) done(solved);
-    }];
-}
-
-@end
 
 #pragma mark - The cover over the Alarms tab
 
@@ -403,11 +320,9 @@ static NSString *ALHoursText(NSInteger hours) {
     UILabel *_title;
     UILabel *_body;
     UILabel *_note;
-    UIButton *_unlock;
     UIButton *_pill;
     NSTimer *_timer;
     ALLockState _shown;
-    BOOL _sumsOpen;
 }
 
 - (instancetype)initWithHost:(UIViewController *)host {
@@ -454,6 +369,7 @@ static NSString *ALHoursText(NSInteger hours) {
     _title.textColor = UIColor.whiteColor;
     _title.textAlignment = NSTextAlignmentCenter;
     _title.numberOfLines = 0;
+    _title.text = @"Alarms locked";
 
     _body = [UILabel new];
     _body.font = [UIFont systemFontOfSize:17];
@@ -461,22 +377,13 @@ static NSString *ALHoursText(NSInteger hours) {
     _body.textAlignment = NSTextAlignmentCenter;
     _body.numberOfLines = 0;
 
-    _unlock = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_unlock setTitle:@"Unlock with sums" forState:UIControlStateNormal];
-    _unlock.titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
-    _unlock.backgroundColor = UIColor.systemYellowColor;
-    [_unlock setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
-    _unlock.layer.cornerRadius = 16;
-    [_unlock.heightAnchor constraintEqualToConstant:58].active = YES;
-    [_unlock addTarget:self action:@selector(startSums) forControlEvents:UIControlEventTouchUpInside];
-
     _note = [UILabel new];
     _note.font = [UIFont systemFontOfSize:13];
     _note.textColor = [UIColor colorWithWhite:1 alpha:0.6];
     _note.textAlignment = NSTextAlignmentCenter;
     _note.numberOfLines = 0;
 
-    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[icon, _title, _body, _unlock, _note]];
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[icon, _title, _body, _note]];
     stack.axis = UILayoutConstraintAxisVertical;
     stack.spacing = 18;
     stack.translatesAutoresizingMaskIntoConstraints = NO;
@@ -527,43 +434,35 @@ static NSString *ALHoursText(NSInteger hours) {
     NSDate *now = ALNow();
     ALLockState state = ALStateAt(now, fresh);
     NSDate *next = ALCachedNext;
-    NSInteger hours = ALHours();
 
-    BOOL covered = state == ALLockStateLocked || state == ALLockStateSealed;
+    BOOL covered = state == ALLockStateLocked;
     _cover.hidden = !covered;
     _pill.hidden = covered;
     if (covered && state != _shown) [self bringToFront];
     _shown = state;
 
-    if (state == ALLockStateSealed) {
-        _title.text = @"Alarms locked";
-        _body.text = [NSString stringWithFormat:@"Your %@ alarm is less than %@ away. Nothing unlocks until it has rung.",
-                      ALTime(next), hours == 1 ? @"1 hour" : [NSString stringWithFormat:@"%ld hours", (long)hours]];
-        _unlock.hidden = YES;
-    } else if (state == ALLockStateLocked) {
-        _title.text = @"Alarms locked";
-        _body.text = [NSString stringWithFormat:@"You can't turn alarms off, delete or change them. Do %ld sums to unlock for %d minutes.",
-                      (long)ALSumsPerUnlock, (int)(ALUnlockSeconds / 60)];
-        _unlock.hidden = _sumsOpen;
-    }
     if (covered) {
+        _body.text = next
+            ? [NSString stringWithFormat:@"They unlock by themselves once your %@ alarm has rung and you've done its missions.", ALTime(next)]
+            : @"They unlock by themselves once your next alarm has rung and you've done its missions.";
         NSMutableArray<NSString *> *lines = [NSMutableArray array];
-        if (next) [lines addObject:[NSString stringWithFormat:@"Next alarm: %@", ALTime(next)]];
-        if (hours > 0) [lines addObject:[NSString stringWithFormat:@"Sums stop working %@.", ALHoursText(hours)]];
-        if (hours > 0 && ALReadProblem) {
-            [lines addObject:[NSString stringWithFormat:@"%@ The hours-before rule is off until it can.", ALReadProblem]];
-        }
+        [lines addObject:[NSString stringWithFormat:@"After that they lock again %@ before the following alarm.", ALHoursText(ALHours())]];
+        if (ALDelay() > 0) [lines addObject:[NSString stringWithFormat:@"Missions wait %@ after an alarm goes off.", ALDelayText(ALDelay())]];
         [lines addObject:@"Emergency escape is off while the lock is on."];
+        NSDate *release = ALReleaseAt(ALDateFor(ALKeyActivity));
+        if (release) [lines addObject:[NSString stringWithFormat:@"Safety release: if no alarm rings before %@, they unlock.", ALDayAndTime(release)]];
+        if (ALReadProblem) [lines addObject:ALReadProblem];
         if (ALReadSummary) [lines addObject:ALReadSummary];
         _note.text = [lines componentsJoinedByString:@"\n"];
     }
 
     NSString *title;
     if (state == ALLockStateOff) {
-        title = @"Lock alarms";
+        title = ALDelay() > 0 ? [NSString stringWithFormat:@"Alarm lock off · delay %ld min", (long)ALDelay()] : @"Alarm lock off";
         [_pill setImage:[UIImage systemImageNamed:@"lock.fill"] forState:UIControlStateNormal];
     } else {
-        title = [NSString stringWithFormat:@"Unlocked until %@", ALTime(ALOpenUntil(now, ALCachedNext) ?: now)];
+        NSDate *until = ALOpenUntil(now, next);
+        title = until ? [NSString stringWithFormat:@"Unlocked until %@", ALTime(until)] : @"Unlocked";
         [_pill setImage:[UIImage systemImageNamed:@"lock.open.fill"] forState:UIControlStateNormal];
     }
     NSString *shown = [@" " stringByAppendingString:title];
@@ -578,81 +477,90 @@ static NSString *ALHoursText(NSInteger hours) {
     return top;
 }
 
-- (void)startSums {
-    if (_sumsOpen) return;
-    _sumsOpen = YES;
-    ALSumsViewController *sums = [ALSumsViewController new];
-    sums.modalPresentationStyle = UIModalPresentationFullScreen;
-    __weak ALLockUI *weakSelf = self;
-    sums.onDone = ^(BOOL solved) {
-        ALLockUI *strongSelf = weakSelf;
-        if (strongSelf) strongSelf->_sumsOpen = NO;
-        if (solved) {
-            NSDate *now = ALNow();
-            // The seal may have started while the sums were on screen.
-            if (ALStateAt(now, YES) == ALLockStateSealed) {
-                ALLog(@"sums done, but the alarm is too close now");
-            } else {
-                ALGrantUnlock(now);
-            }
-        }
-        [strongSelf refresh:YES];
-    };
-    [[self topController] presentViewController:sums animated:YES completion:nil];
+/// Settings can only be changed while the lock is off or open.
+- (BOOL)canChange {
+    ALLockState state = ALStateAt(ALNow(), YES);
+    if (state == ALLockStateLocked) { [self refresh:YES]; return NO; }
+    return YES;
 }
 
 - (void)pillTapped {
-    NSDate *now = ALNow();
-    ALLockState state = ALStateAt(now, YES);
-    if (state == ALLockStateOff) {
-        [self chooseHoursThen:^(NSInteger hours) {
-            [ALDefaults() setObject:@(hours) forKey:ALKeyHours];
-            [ALDefaults() setBool:YES forKey:ALKeyOn];
-            ALRelock();
-            ALLog(@"lock turned on, sealed %ld h before", (long)hours);
+    if (![self canChange]) return;
+    BOOL on = ALLockOn();
+    NSString *message = on
+        ? [NSString stringWithFormat:@"Locks %@ before each alarm. Mission delay: %@.", ALHoursText(ALHours()), ALDelayText(ALDelay())]
+        : [NSString stringWithFormat:@"While locked, alarms can't be turned off, deleted or changed, and emergency escape is off. "
+                                     @"They unlock by themselves once an alarm has rung and its missions are done. Mission delay: %@.",
+                                     ALDelayText(ALDelay())];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:on ? @"Alarms unlocked" : @"Alarm lock"
+                                                                    message:message
+                                                             preferredStyle:UIAlertControllerStyleActionSheet];
+    if (on) {
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Lock now" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            if (![self canChange]) return;
+            ALLockNow(ALNow());
             [self refresh:YES];
-        } title:@"Lock your alarms?"
-          message:@"While locked, you can't turn alarms off, delete or change them, and emergency escape is off. "
-                  @"Three sums unlock them for 10 minutes. How long before an alarm should even the sums stop working?"];
-        return;
+        }]];
+        [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Lock time: %@ before", ALHoursText(ALHours())]
+                                                  style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [self chooseHoursThen:^(NSInteger hours) {
+                if (![self canChange]) return;
+                [ALDefaults() setObject:@(hours) forKey:ALKeyHours];
+                [self refresh:YES];
+            }];
+        }]];
+    } else {
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Turn the lock on…" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [self chooseHoursThen:^(NSInteger hours) {
+                [ALDefaults() setObject:@(hours) forKey:ALKeyHours];
+                ALTurnOn(ALNow());
+                [self refresh:YES];
+            }];
+        }]];
     }
-    if (state != ALLockStateOpen) { [self refresh:YES]; return; }
-
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Alarms unlocked"
-        message:[NSString stringWithFormat:@"Sums stop working %@.", ALHoursText(ALHours())]
-        preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Lock now" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        ALRelock();
-        [self refresh:YES];
+    [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Mission delay: %@", ALDelayText(ALDelay())]
+                                              style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self chooseDelay];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Change hours before an alarm" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [self chooseHoursThen:^(NSInteger hours) {
-            if (ALStateAt(ALNow(), YES) != ALLockStateOpen) return; // the unlock ran out meanwhile
-            [ALDefaults() setObject:@(hours) forKey:ALKeyHours];
+    if (on) {
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Turn the lock off" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+            if (![self canChange]) return;
+            ALTurnOff();
             [self refresh:YES];
-        } title:@"Sums stop working" message:@"How long before an alarm should even the sums stop working?"];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Turn the lock off" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
-        if (ALStateAt(ALNow(), YES) != ALLockStateOpen) { [self refresh:YES]; return; }
-        [ALDefaults() setBool:NO forKey:ALKeyOn];
-        ALRelock();
-        ALLog(@"lock turned off");
-        [self refresh:YES];
-    }]];
+        }]];
+    }
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [self present:sheet];
 }
 
-- (void)chooseHoursThen:(void (^)(NSInteger hours))chosen title:(NSString *)title message:(NSString *)message {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:title message:message
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+- (void)chooseHoursThen:(void (^)(NSInteger hours))chosen {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Lock time"
+        message:@"How long before each alarm should the lock close? It stays closed until that alarm has rung and its missions are done."
+        preferredStyle:UIAlertControllerStyleActionSheet];
     for (NSNumber *choice in ALHourChoices()) {
         NSInteger hours = choice.integerValue;
-        NSString *label = hours == 0 ? @"Sums always work"
-            : [NSString stringWithFormat:@"%@%@", hours == 1 ? @"1 hour" : [NSString stringWithFormat:@"%ld hours", (long)hours],
-               hours == ALHours() ? @" (current)" : @""];
+        NSString *label = [NSString stringWithFormat:@"%@ before%@", ALHoursText(hours), hours == ALHours() && ALLockOn() ? @" (current)" : @""];
         [sheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
             chosen(hours);
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [self present:sheet];
+}
+
+- (void)chooseDelay {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Mission delay"
+        message:@"For this long after an alarm goes off, its missions can't start, so it keeps ringing. Snooze waits too."
+        preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSNumber *choice in ALDelayChoices()) {
+        NSInteger minutes = choice.integerValue;
+        NSString *label = minutes == 0 ? @"Off" : ALDelayText(minutes);
+        if (minutes == ALDelay()) label = [label stringByAppendingString:@" (current)"];
+        [sheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            if (![self canChange]) return;
+            [ALDefaults() setInteger:minutes forKey:ALKeyDelay];
+            ALLog(@"mission delay %ld min", (long)minutes);
+            [self refresh:YES];
         }]];
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
@@ -663,6 +571,101 @@ static NSString *ALHoursText(NSInteger hours) {
     sheet.popoverPresentationController.sourceView = _pill;
     sheet.popoverPresentationController.sourceRect = _pill.bounds;
     [[self topController] presentViewController:sheet animated:YES completion:nil];
+}
+
+@end
+
+#pragma mark - The countdown over the ringing screen
+
+/// Covers Alarmy's ringing screen until the mission delay is over, then takes itself away.
+@interface ALHoldUI : NSObject
+- (instancetype)initWithHost:(UIViewController *)host;
+- (void)refresh;
+@end
+
+@implementation ALHoldUI {
+    __weak UIViewController *_host;
+    UIView *_cover;
+    UILabel *_countdown;
+    NSTimer *_timer;
+}
+
+- (instancetype)initWithHost:(UIViewController *)host {
+    if (!(self = [super init])) return nil;
+    _host = host;
+    [self build];
+    __weak ALHoldUI *weakSelf = self;
+    _timer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) {
+        [weakSelf refresh];
+    }];
+    [self refresh];
+    return self;
+}
+
+- (void)dealloc {
+    [_timer invalidate];
+}
+
+- (void)build {
+    UIView *view = _host.view;
+    _cover = [UIView new];
+    _cover.translatesAutoresizingMaskIntoConstraints = NO;
+    _cover.backgroundColor = [UIColor colorWithWhite:0 alpha:0.6];
+    _cover.accessibilityIdentifier = @"alarmlock-hold";
+
+    UILabel *title = [UILabel new];
+    title.text = @"Missions open in";
+    title.font = [UIFont systemFontOfSize:20 weight:UIFontWeightSemibold];
+    title.textColor = UIColor.whiteColor;
+    title.textAlignment = NSTextAlignmentCenter;
+
+    _countdown = [UILabel new];
+    _countdown.font = [UIFont monospacedDigitSystemFontOfSize:72 weight:UIFontWeightBold];
+    _countdown.textColor = UIColor.systemYellowColor;
+    _countdown.textAlignment = NSTextAlignmentCenter;
+
+    UILabel *body = [UILabel new];
+    body.text = @"The alarm keeps ringing until then.";
+    body.font = [UIFont systemFontOfSize:16];
+    body.textColor = [UIColor colorWithWhite:1 alpha:0.8];
+    body.textAlignment = NSTextAlignmentCenter;
+    body.numberOfLines = 0;
+
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[title, _countdown, body]];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 10;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [_cover addSubview:stack];
+    [view addSubview:_cover];
+
+    UILayoutGuide *safe = view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [_cover.topAnchor constraintEqualToAnchor:view.topAnchor],
+        [_cover.bottomAnchor constraintEqualToAnchor:view.bottomAnchor],
+        [_cover.leadingAnchor constraintEqualToAnchor:view.leadingAnchor],
+        [_cover.trailingAnchor constraintEqualToAnchor:view.trailingAnchor],
+        [stack.centerYAnchor constraintEqualToAnchor:safe.centerYAnchor],
+        [stack.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:24],
+        [stack.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-24],
+    ]];
+}
+
+- (void)refresh {
+    UIViewController *host = _host;
+    NSDate *now = ALNow();
+    NSDate *open = ALMissionsOpenAt(ALDateFor(ALKeyRingStart), ALDelay(), now);
+    if (!host || !open) {
+        // Delay over (or turned off): get out of the way for good.
+        [_timer invalidate];
+        _timer = nil;
+        [_cover removeFromSuperview];
+        _cover = nil;
+        return;
+    }
+    if (_cover.superview != host.view) return;
+    [host.view bringSubviewToFront:_cover]; // Alarmy may add its own views on top later
+    NSInteger left = (NSInteger)ceil([open timeIntervalSinceDate:now]);
+    _countdown.text = [NSString stringWithFormat:@"%ld:%02ld", (long)(left / 60), (long)(left % 60)];
 }
 
 @end
@@ -682,6 +685,7 @@ static IMP ALReplace(Class cls, SEL sel, IMP replacement) {
 }
 
 static const void *ALUIKey = &ALUIKey;
+static const void *ALHoldKey = &ALHoldKey;
 
 static ALLockUI *ALAttach(UIViewController *controller) {
     ALLockUI *ui = objc_getAssociatedObject(controller, ALUIKey);
@@ -728,31 +732,52 @@ static UIView *ALEscapeHitTest(UIView *self, SEL sel, CGPoint point, UIEvent *ev
 // Alarmy's ringing screen. Its mission preview is a subclass, which must not count as a real ring.
 static Class ALPreviewClass;
 static BOOL ALRingShown;
-typedef void (*ALDeallocFn)(__unsafe_unretained id, SEL);
+static const NSTimeInterval ALRingStartKeep = 2 * 3600;
 
 static BOOL ALIsRealRing(__unsafe_unretained id controller) {
     return !(ALPreviewClass && [controller isKindOfClass:ALPreviewClass]);
 }
 
-/// A ring has started: the lock closes again at once, so snoozing can't be used to get in.
-static void ALRingStarted(void) {
+/// A ring has started: the lock closes again at once, so snoozing can't be used to get in, and the
+/// mission delay counts from when the alarm went off.
+static void ALRingStarted(UIViewController *container) {
+    NSDate *now = ALNow();
     ALRingShown = YES;
-    [ALDefaults() removeObjectForKey:ALKeyDoneAt];
-    ALLog(@"alarm ringing, lock closed");
+    ALSetDate(ALKeyDoneAt, nil);
+    ALSetDate(ALKeyActivity, now);
+
+    // The screen can appear again for the same ring (after an ad, or reopening the app): keep its start.
+    NSDate *start = ALDateFor(ALKeyRingStart);
+    NSTimeInterval age = start ? [now timeIntervalSinceDate:start] : -1;
+    if (!start || age < -60 || age > ALRingStartKeep) {
+        NSArray<ALAlarmRecord *> *alarms = ALReadAlarms();
+        start = (alarms ? ALRingStart(alarms, now) : nil) ?: now;
+        ALSetDate(ALKeyRingStart, start);
+    }
+    ALLog(@"alarm ringing, lock closed, went off at %@", ALTime(start));
+
+    if (ALMissionsOpenAt(start, ALDelay(), now) && !objc_getAssociatedObject(container, ALHoldKey)) {
+        ALHoldUI *hold = [[ALHoldUI alloc] initWithHost:container];
+        objc_setAssociatedObject(container, ALHoldKey, hold, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        ALLog(@"missions held for %ld min", (long)ALDelay());
+    }
 }
 
 /// The ringing screen has gone for good: the alarm rang and its missions were done.
 static void ALRingEnded(void) {
     if (!ALRingShown) return;
     ALRingShown = NO;
-    [ALDefaults() setObject:@(ALNow().timeIntervalSince1970) forKey:ALKeyDoneAt];
-    ALLog(@"alarm finished, lock open until the next alarm's window");
+    NSDate *now = ALNow();
+    ALSetDate(ALKeyDoneAt, now);
+    ALSetDate(ALKeyActivity, now);
+    ALSetDate(ALKeyRingStart, nil);
+    ALLog(@"alarm finished, lock open until the next alarm's lock time");
 }
 
 static ALBoolFn ALOrigRingDidAppear;
 static void ALRingDidAppear(UIViewController *self, SEL sel, BOOL animated) {
     ALOrigRingDidAppear(self, sel, animated);
-    if (ALIsRealRing(self)) ALRingStarted();
+    if (ALIsRealRing(self)) ALRingStarted(self);
 }
 
 static ALBoolFn ALOrigRingDidDisappear;

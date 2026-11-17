@@ -4,11 +4,22 @@ A personal add-on for the owner's own copy of Alarmy, decrypted from their own A
 
 ## What it does
 
-- A **Lock alarms** button on the Alarms tab turns the lock on.
-- While the lock is on, the Alarms tab is covered, so alarms can't be turned off, deleted or changed. Alarmy's emergency escape is hidden too.
-- Three sums unlock everything for 10 minutes. While it's unlocked, the lock can be turned off or the hours changed.
-- In the chosen hours before the next alarm (1 to 12, or never), not even the sums unlock it. The add-on reads the next alarm time from Alarmy's own data and never writes to it.
-- Moving the phone's clock doesn't change any of this until the phone is restarted, and a restart ends an unlock.
+All settings are in the button at the bottom left of the Alarms tab.
+
+**Lock**
+- While locked, the Alarms tab is covered, so alarms can't be turned off, deleted or changed. Alarmy's emergency escape is hidden too.
+- Only finishing an alarm opens it: the alarm rang and its missions were done. It then stays open until the chosen hours (1–12) before the next alarm, and locks again by itself.
+- Turning the lock on counts as finishing an alarm, so it first locks at the chosen hours before the next one.
+- Any alarm starting to ring closes it again at once, so a snooze can't be used to get in.
+- **Safety release:** if no alarm rings for 4 days, it opens. That only happens if alarms stopped working or something in the add-on broke, so the alarms can't be locked forever.
+- It also opens if no alarm is turned on, since there's nothing to protect.
+- Settings can only be changed while it's open or off.
+
+**Mission delay** (off, or 1–30 minutes)
+- For that long after an alarm goes off, the ringing screen is covered with a countdown, so the missions and snooze can't start and the alarm keeps ringing.
+- Alarmy's mission previews aren't affected.
+
+The add-on reads alarm times from Alarmy's own data and never writes to it. Moving the phone's clock doesn't change any of this until the phone is restarted.
 
 ## Building
 

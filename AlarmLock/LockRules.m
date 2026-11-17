@@ -1,25 +1,17 @@
 #import "LockRules.h"
 #import <math.h>
 
-const NSTimeInterval ALUnlockSeconds = 10 * 60;
-const NSInteger ALSumsPerUnlock = 3;
+const NSInteger ALMaxDelayMinutes = 30;
+const NSTimeInterval ALReleaseSeconds = 4 * 24 * 3600;
 static const NSTimeInterval ALClockTolerance = 120;
+static const NSTimeInterval ALRingLookback = 2 * 3600;
 
 NSArray<NSNumber *> *ALHourChoices(void) {
-    return @[@0, @1, @2, @3, @4, @6, @8, @12];
+    return @[@1, @2, @3, @4, @6, @8, @12];
 }
 
-/// Boot IDs match, counting "unavailable" on both sides as a match so a phone that won't say
-/// still gets a working lock (falling back to the uptime check).
-static BOOL ALSameBootID(NSString *a, NSString *b) {
-    return [(a ?: @"") isEqualToString:(b ?: @"")];
-}
-
-BOOL ALIsUnlocked(NSDate *until, NSString *untilBoot, NSString *boot, NSDate *now) {
-    if (!until) return NO;
-    if (!ALSameBootID(untilBoot, boot)) return NO;
-    NSTimeInterval t = now.timeIntervalSince1970, end = until.timeIntervalSince1970;
-    return t < end && t >= end - ALUnlockSeconds;
+NSArray<NSNumber *> *ALDelayChoices(void) {
+    return @[@0, @1, @2, @3, @5, @10, @15, @20, @30];
 }
 
 NSDate *ALOpenAfterAlarmUntil(NSDate *doneAt, NSInteger hoursBefore, NSDate *nextAlarm, NSDate *now) {
@@ -31,16 +23,16 @@ NSDate *ALOpenAfterAlarmUntil(NSDate *doneAt, NSInteger hoursBefore, NSDate *nex
     return [now compare:end] == NSOrderedAscending ? end : nil;
 }
 
-BOOL ALIsSealed(NSInteger hoursBefore, NSDate *nextAlarm, NSDate *now) {
-    if (hoursBefore <= 0 || !nextAlarm) return NO;
-    NSTimeInterval t = now.timeIntervalSince1970, fire = nextAlarm.timeIntervalSince1970;
-    return t < fire && t >= fire - (NSTimeInterval)hoursBefore * 3600;
+NSDate *ALReleaseAt(NSDate *lastActivity) {
+    return lastActivity ? [lastActivity dateByAddingTimeInterval:ALReleaseSeconds] : nil;
 }
 
-ALLockState ALLockStateAt(BOOL lockOn, NSInteger hoursBefore, NSDate *nextAlarm, BOOL unlocked, NSDate *now) {
+ALLockState ALLockStateAt(BOOL lockOn, NSDate *openUntil, BOOL noAlarmsOn, NSDate *lastActivity, NSDate *now) {
     if (!lockOn) return ALLockStateOff;
-    if (ALIsSealed(hoursBefore, nextAlarm, now)) return ALLockStateSealed;
-    return unlocked ? ALLockStateOpen : ALLockStateLocked;
+    if (openUntil || noAlarmsOn) return ALLockStateOpen;
+    NSDate *release = ALReleaseAt(lastActivity);
+    if (release && [now compare:release] != NSOrderedAscending) return ALLockStateOpen;
+    return ALLockStateLocked;
 }
 
 @implementation ALAlarmRecord
@@ -73,6 +65,33 @@ NSDate *ALNextAlarm(NSArray<ALAlarmRecord *> *alarms, NSDate *now, NSCalendar *c
     return best;
 }
 
+NSDate *ALRingStart(NSArray<ALAlarmRecord *> *alarms, NSDate *now) {
+    NSDate *best = nil;
+    for (ALAlarmRecord *alarm in alarms) {
+        NSDate *fired = alarm.lastFiredDate;
+        if (!fired) continue;
+        NSTimeInterval ago = [now timeIntervalSinceDate:fired];
+        if (ago < 0 || ago > ALRingLookback) continue;
+        if (!best || [fired compare:best] == NSOrderedDescending) best = fired;
+    }
+    return best;
+}
+
+NSDate *ALMissionsOpenAt(NSDate *ringStart, NSInteger delayMinutes, NSDate *now) {
+    if (!ringStart || delayMinutes <= 0) return nil;
+    NSInteger minutes = MIN(delayMinutes, ALMaxDelayMinutes);
+    // A start in the future means the clock jumped: never hold missions back for that.
+    if ([now timeIntervalSinceDate:ringStart] < -60) return nil;
+    NSDate *end = [ringStart dateByAddingTimeInterval:(NSTimeInterval)minutes * 60];
+    return [now compare:end] == NSOrderedAscending ? end : nil;
+}
+
+/// Boot IDs match, counting "unavailable" on both sides as a match so a phone that won't say
+/// still gets a working clock check (falling back to the uptime check).
+static BOOL ALSameBootID(NSString *a, NSString *b) {
+    return [(a ?: @"") isEqualToString:(b ?: @"")];
+}
+
 static NSDate *ALDerived(NSDictionary *anchor, double mono, NSString *boot) {
     if (!anchor) return nil;
     NSString *anchorBoot = anchor[@"boot"];
@@ -100,16 +119,4 @@ NSDictionary *ALRefreshedAnchor(NSDictionary *anchor, NSDate *wall, double mono,
         if (wall.timeIntervalSince1970 - [anchor[@"wall"] doubleValue] < 60) return anchor;
     }
     return @{ @"wall": @(wall.timeIntervalSince1970), @"mono": @(mono), @"boot": boot ?: @"" };
-}
-
-ALSum ALMakeSum(uint32_t (*pick)(uint32_t upperBound)) {
-    ALSum sum;
-    sum.a = 10 + pick(90);
-    sum.b = 2 + pick(8);
-    sum.c = 10 + pick(90);
-    return sum;
-}
-
-NSInteger ALSumAnswer(ALSum sum) {
-    return sum.a * sum.b + sum.c;
 }

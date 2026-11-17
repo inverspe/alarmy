@@ -20,41 +20,29 @@ static NSDate *D(NSString *s) {
     return [f dateFromString:s];
 }
 
-static uint32_t lowest(uint32_t n) { (void)n; return 0; }
-static uint32_t highest(uint32_t n) { return n - 1; }
-
-static void testSealedWindow(void) {
-    NSDate *alarm = D(@"2026-10-21 07:00");
-    CHECK(!ALIsSealed(3, alarm, D(@"2026-10-21 03:59")), "before the window");
-    CHECK(ALIsSealed(3, alarm, D(@"2026-10-21 04:00")), "window starts 3 h before");
-    CHECK(ALIsSealed(3, alarm, D(@"2026-10-21 06:59")), "still sealed just before");
-    CHECK(!ALIsSealed(3, alarm, D(@"2026-10-21 07:00")), "ends when the alarm rings");
-    CHECK(!ALIsSealed(0, alarm, D(@"2026-10-21 06:59")), "0 hours never seals");
-    CHECK(!ALIsSealed(3, nil, D(@"2026-10-21 06:59")), "no known alarm, no seal");
-    CHECK(ALIsSealed(12, alarm, D(@"2026-10-20 19:00")), "12 h reaches the evening before");
-}
-
-static void testUnlockWindow(void) {
-    NSDate *until = D(@"2026-10-21 12:10");
-    CHECK(ALIsUnlocked(until, @"a", @"a", D(@"2026-10-21 12:00")), "open from when it was earned");
-    CHECK(ALIsUnlocked(until, @"a", @"a", D(@"2026-10-21 12:09")), "open for 10 minutes");
-    CHECK(!ALIsUnlocked(until, @"a", @"a", D(@"2026-10-21 12:10")), "closes after 10 minutes");
-    CHECK(!ALIsUnlocked(until, @"a", @"a", D(@"2026-10-21 11:59")), "clock turned back can't reopen it");
-    CHECK(!ALIsUnlocked(until, @"a", @"a", D(@"2026-09-01 12:05")), "clock turned far back can't reopen it");
-    CHECK(!ALIsUnlocked(until, @"a", @"b", D(@"2026-10-21 12:05")), "a restart ends it");
-    CHECK(ALIsUnlocked(until, nil, nil, D(@"2026-10-21 12:05")), "works when the phone won't give a boot ID");
-    CHECK(!ALIsUnlocked(nil, @"a", @"a", D(@"2026-10-21 12:05")), "never unlocked");
-    CHECK(ALUnlockSeconds == 600, "10 minutes");
+static ALAlarmRecord *fired(NSString *when) {
+    ALAlarmRecord *r = [ALAlarmRecord enabled:YES next:nil hour:7 minute:0];
+    r.lastFiredDate = when ? D(when) : nil;
+    return r;
 }
 
 static void testStates(void) {
-    NSDate *alarm = D(@"2026-10-21 07:00");
-    CHECK(ALLockStateAt(NO, 3, alarm, NO, D(@"2026-10-21 06:00")) == ALLockStateOff, "off is off, even near the alarm");
-    CHECK(ALLockStateAt(YES, 3, alarm, NO, D(@"2026-10-21 01:00")) == ALLockStateLocked, "locked, sums open it");
-    CHECK(ALLockStateAt(YES, 3, alarm, YES, D(@"2026-10-21 01:00")) == ALLockStateOpen, "open after the sums");
-    CHECK(ALLockStateAt(YES, 3, alarm, NO, D(@"2026-10-21 05:00")) == ALLockStateSealed, "sealed near the alarm");
-    CHECK(ALLockStateAt(YES, 3, alarm, YES, D(@"2026-10-21 05:00")) == ALLockStateSealed, "the seal cuts an unlock short");
-    CHECK(ALLockStateAt(YES, 0, alarm, NO, D(@"2026-10-21 06:59")) == ALLockStateLocked, "0 hours: sums work up to the alarm");
+    NSDate *now = D(@"2026-10-21 01:00"), *recent = D(@"2026-10-20 22:00");
+    NSDate *until = D(@"2026-10-21 04:00");
+    CHECK(ALLockStateAt(NO, nil, NO, recent, now) == ALLockStateOff, "off is off");
+    CHECK(ALLockStateAt(YES, nil, NO, recent, now) == ALLockStateLocked, "locked, and nothing but the alarm opens it");
+    CHECK(ALLockStateAt(YES, until, NO, recent, now) == ALLockStateOpen, "open after the alarm was finished");
+    CHECK(ALLockStateAt(YES, nil, YES, recent, now) == ALLockStateOpen, "no alarms on: nothing to protect");
+    CHECK(ALLockStateAt(YES, nil, NO, nil, now) == ALLockStateLocked, "unknown last activity never lets go");
+}
+
+static void testRelease(void) {
+    NSDate *last = D(@"2026-10-21 07:10");
+    CHECK([ALReleaseAt(last) isEqualToDate:D(@"2026-10-25 07:10")], "lets go 4 days later");
+    CHECK(ALLockStateAt(YES, nil, NO, last, D(@"2026-10-25 07:09")) == ALLockStateLocked, "still locked just before");
+    CHECK(ALLockStateAt(YES, nil, NO, last, D(@"2026-10-25 07:10")) == ALLockStateOpen, "lets go after 4 days with no alarm");
+    CHECK(ALLockStateAt(YES, nil, NO, last, D(@"2026-10-24 07:10")) == ALLockStateLocked, "a weekend without alarms isn't enough");
+    CHECK(ALReleaseAt(nil) == nil, "no activity, no release time");
 }
 
 static void testOpenAfterAlarm(void) {
@@ -67,6 +55,33 @@ static void testOpenAfterAlarm(void) {
     CHECK(ALOpenAfterAlarmUntil(nil, 3, next, D(@"2026-10-21 12:00")) == nil, "no alarm finished");
     CHECK(ALOpenAfterAlarmUntil(done, 3, next, D(@"2026-10-21 07:00")) == nil, "clock turned back before it finished");
     CHECK(ALOpenAfterAlarmUntil(done, 3, D(@"2026-10-21 08:00"), D(@"2026-10-21 07:11")) == nil, "another alarm soon keeps it locked");
+    // Turning the lock on counts as just finished: open until the window, or locked at once inside it.
+    CHECK([ALOpenAfterAlarmUntil(D(@"2026-10-21 15:00"), 3, next, D(@"2026-10-21 15:00")) isEqualToDate:D(@"2026-10-22 04:00")], "turned on in the afternoon");
+    CHECK(ALOpenAfterAlarmUntil(D(@"2026-10-22 05:00"), 3, next, D(@"2026-10-22 05:00")) == nil, "turned on inside the window locks at once");
+}
+
+static void testMissionDelay(void) {
+    NSDate *start = D(@"2026-10-21 07:00");
+    CHECK([ALMissionsOpenAt(start, 5, D(@"2026-10-21 07:00")) isEqualToDate:D(@"2026-10-21 07:05")], "held for 5 minutes");
+    CHECK([ALMissionsOpenAt(start, 5, D(@"2026-10-21 07:04")) isEqualToDate:D(@"2026-10-21 07:05")], "still held");
+    CHECK(ALMissionsOpenAt(start, 5, D(@"2026-10-21 07:05")) == nil, "open after 5 minutes");
+    CHECK(ALMissionsOpenAt(start, 0, D(@"2026-10-21 07:01")) == nil, "0 is off");
+    CHECK(ALMissionsOpenAt(nil, 5, D(@"2026-10-21 07:01")) == nil, "no ring, nothing held");
+    CHECK([ALMissionsOpenAt(start, 600, D(@"2026-10-21 07:01")) isEqualToDate:D(@"2026-10-21 07:30")], "never more than 30 minutes");
+    CHECK(ALMissionsOpenAt(start, 5, D(@"2026-10-21 06:50")) == nil, "a start in the future is ignored");
+    CHECK([ALDelayChoices() containsObject:@0] && [ALDelayChoices() containsObject:@5], "off and 5 minutes are choices");
+    CHECK(![ALHourChoices() containsObject:@0] && [ALHourChoices() containsObject:@3], "3 hours is a choice, 0 isn't");
+}
+
+static void testRingStart(void) {
+    NSDate *now = D(@"2026-10-21 07:20");
+    NSArray *alarms = @[fired(@"2026-10-21 07:00"), fired(@"2026-10-20 22:00"), fired(nil)];
+    CHECK([ALRingStart(alarms, now) isEqualToDate:D(@"2026-10-21 07:00")], "the alarm that just went off");
+    NSArray *two = @[fired(@"2026-10-21 06:50"), fired(@"2026-10-21 07:15")];
+    CHECK([ALRingStart(two, now) isEqualToDate:D(@"2026-10-21 07:15")], "the latest one");
+    CHECK(ALRingStart(@[fired(@"2026-10-21 05:00")], now) == nil, "more than 2 hours ago doesn't count");
+    CHECK(ALRingStart(@[fired(@"2026-10-21 08:00")], now) == nil, "a time in the future doesn't count");
+    CHECK(ALRingStart(@[], now) == nil, "no alarms");
 }
 
 static void testNextAlarm(void) {
@@ -111,24 +126,15 @@ static void testTrustedClock(void) {
     CHECK([moved[@"mono"] doubleValue] == 1090, "refreshed after a minute");
 }
 
-static void testSums(void) {
-    ALSum low = ALMakeSum(lowest), high = ALMakeSum(highest);
-    CHECK(low.a == 10 && low.b == 2 && low.c == 10, "smallest sum");
-    CHECK(high.a == 99 && high.b == 9 && high.c == 99, "largest sum");
-    CHECK(ALSumAnswer(low) == 30 && ALSumAnswer(high) == 990, "answers");
-    CHECK(ALSumsPerUnlock == 3, "three sums");
-    CHECK([ALHourChoices() containsObject:@3] && [ALHourChoices() containsObject:@0], "3 hours and off are choices");
-}
-
 int main(void) {
     @autoreleasepool {
-        testSealedWindow();
-        testUnlockWindow();
         testStates();
+        testRelease();
         testOpenAfterAlarm();
+        testMissionDelay();
+        testRingStart();
         testNextAlarm();
         testTrustedClock();
-        testSums();
     }
     printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
