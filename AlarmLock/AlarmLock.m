@@ -24,6 +24,11 @@ static NSString *const ALKeyDoneAt = @"AlarmLock.alarmDoneAt";
 static NSString *const ALKeyActivity = @"AlarmLock.lastActivity";
 /// When the alarm that is ringing went off, for the mission delay.
 static NSString *const ALKeyRingStart = @"AlarmLock.ringStart";
+/// An alarm is ringing (or snoozed) and its missions aren't done. Kept across Alarmy being closed.
+static NSString *const ALKeyRinging = @"AlarmLock.ringing";
+/// For the lock screen: when the ringing screen last appeared, and when an alarm was last finished.
+static NSString *const ALKeyLastRingAt = @"AlarmLock.lastRingAt";
+static NSString *const ALKeyLastFinishedAt = @"AlarmLock.lastFinishedAt";
 
 static NSUserDefaults *ALDefaults(void) { return NSUserDefaults.standardUserDefaults; }
 static BOOL ALLockOn(void) { return [ALDefaults() boolForKey:ALKeyOn]; }
@@ -293,6 +298,7 @@ static void ALLockNow(NSDate *now) {
 
 static void ALTurnOff(void) {
     [ALDefaults() setBool:NO forKey:ALKeyOn];
+    [ALDefaults() removeObjectForKey:ALKeyRinging];
     ALSetDate(ALKeyDoneAt, nil);
     ALLog(@"lock turned off");
 }
@@ -305,6 +311,12 @@ static NSString *ALDelayText(NSInteger minutes) {
     if (minutes <= 0) return @"off";
     return minutes == 1 ? @"1 minute" : [NSString stringWithFormat:@"%ld minutes", (long)minutes];
 }
+
+static void ALRingEnded(NSString *how);
+/// Alarmy's ringing screen while it exists in this run of the app.
+static __weak UIViewController *ALLiveRing;
+/// How long the Alarms tab must be on screen, with no ringing screen up, before a ring counts as over.
+static const NSTimeInterval ALRingGoneAfter = 15;
 
 #pragma mark - The cover over the Alarms tab
 
@@ -323,6 +335,7 @@ static NSString *ALDelayText(NSInteger minutes) {
     UIButton *_pill;
     NSTimer *_timer;
     ALLockState _shown;
+    NSDate *_clearSince;
 }
 
 - (instancetype)initWithHost:(UIViewController *)host {
@@ -429,9 +442,35 @@ static NSString *ALDelayText(NSInteger minutes) {
     [view bringSubviewToFront:_pill];
 }
 
+/// The Alarms tab is what's on screen: the app is in front, the tab is in a visible window and
+/// nothing is shown over it, and no ringing screen is up anywhere.
+- (BOOL)alarmsTabOnScreen {
+    UIViewController *host = _host;
+    UIWindow *window = host.viewIfLoaded.window;
+    if (!window || window.hidden || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return NO;
+    if (host.presentedViewController) return NO;
+    UIViewController *ring = ALLiveRing;
+    UIWindow *ringWindow = ring.viewIfLoaded.window;
+    if (ringWindow && !ringWindow.hidden) return NO;
+    return YES;
+}
+
+- (void)noticeRingGone:(NSDate *)now {
+    if (![ALDefaults() boolForKey:ALKeyRinging] || ![self alarmsTabOnScreen]) {
+        _clearSince = nil;
+        return;
+    }
+    if (!_clearSince) _clearSince = now;
+    if ([now timeIntervalSinceDate:_clearSince] >= ALRingGoneAfter) {
+        _clearSince = nil;
+        ALRingEnded(@"the ringing screen is gone and the Alarms tab is showing");
+    }
+}
+
 - (void)refresh:(BOOL)fresh {
     if (!_host) return;
     NSDate *now = ALNow();
+    [self noticeRingGone:now];
     ALLockState state = ALStateAt(now, fresh);
     NSDate *next = ALCachedNext;
 
@@ -442,10 +481,24 @@ static NSString *ALDelayText(NSInteger minutes) {
     _shown = state;
 
     if (covered) {
-        _body.text = next
-            ? [NSString stringWithFormat:@"They unlock by themselves once your %@ alarm has rung and you've done its missions.", ALTime(next)]
-            : @"They unlock by themselves once your next alarm has rung and you've done its missions.";
+        NSDate *done = ALDateFor(ALKeyDoneAt);
+        if ([ALDefaults() boolForKey:ALKeyRinging]) {
+            _body.text = @"An alarm is ringing or snoozed. They unlock once you've done its missions.";
+        } else if (done && next) {
+            _body.text = [NSString stringWithFormat:@"Your alarm was finished at %@, but your next alarm at %@ is less than %@ away, so they stay locked until it has rung.",
+                          ALTime(done), ALTime(next), ALHoursText(ALHours())];
+        } else {
+            _body.text = next
+                ? [NSString stringWithFormat:@"They unlock by themselves once your %@ alarm has rung and you've done its missions.", ALTime(next)]
+                : @"They unlock by themselves once your next alarm has rung and you've done its missions.";
+        }
         NSMutableArray<NSString *> *lines = [NSMutableArray array];
+        NSDate *rang = ALDateFor(ALKeyLastRingAt), *finished = ALDateFor(ALKeyLastFinishedAt);
+        if (rang) {
+            BOOL finishedSince = finished && [finished compare:rang] != NSOrderedAscending;
+            [lines addObject:[NSString stringWithFormat:@"Last alarm: rang %@, %@.", ALDayAndTime(rang),
+                              finishedSince ? [NSString stringWithFormat:@"finished %@", ALDayAndTime(finished)] : @"not finished yet"]];
+        }
         [lines addObject:[NSString stringWithFormat:@"After that they lock again %@ before the following alarm.", ALHoursText(ALHours())]];
         if (ALDelay() > 0) [lines addObject:[NSString stringWithFormat:@"Missions wait %@ after an alarm goes off.", ALDelayText(ALDelay())]];
         [lines addObject:@"Emergency escape is off while the lock is on."];
@@ -731,7 +784,6 @@ static UIView *ALEscapeHitTest(UIView *self, SEL sel, CGPoint point, UIEvent *ev
 
 // Alarmy's ringing screen. Its mission preview is a subclass, which must not count as a real ring.
 static Class ALPreviewClass;
-static BOOL ALRingShown;
 static const NSTimeInterval ALRingStartKeep = 2 * 3600;
 
 static BOOL ALIsRealRing(__unsafe_unretained id controller) {
@@ -742,7 +794,9 @@ static BOOL ALIsRealRing(__unsafe_unretained id controller) {
 /// mission delay counts from when the alarm went off.
 static void ALRingStarted(UIViewController *container) {
     NSDate *now = ALNow();
-    ALRingShown = YES;
+    ALLiveRing = container;
+    if (![ALDefaults() boolForKey:ALKeyRinging]) ALSetDate(ALKeyLastRingAt, now);
+    [ALDefaults() setBool:YES forKey:ALKeyRinging];
     ALSetDate(ALKeyDoneAt, nil);
     ALSetDate(ALKeyActivity, now);
 
@@ -764,14 +818,16 @@ static void ALRingStarted(UIViewController *container) {
 }
 
 /// The ringing screen has gone for good: the alarm rang and its missions were done.
-static void ALRingEnded(void) {
-    if (!ALRingShown) return;
-    ALRingShown = NO;
+static void ALRingEnded(NSString *how) {
+    if (![ALDefaults() boolForKey:ALKeyRinging]) return;
+    [ALDefaults() setBool:NO forKey:ALKeyRinging];
+    ALLiveRing = nil;
     NSDate *now = ALNow();
     ALSetDate(ALKeyDoneAt, now);
+    ALSetDate(ALKeyLastFinishedAt, now);
     ALSetDate(ALKeyActivity, now);
     ALSetDate(ALKeyRingStart, nil);
-    ALLog(@"alarm finished, lock open until the next alarm's lock time");
+    ALLog(@"alarm finished (%@), lock open until the next alarm's lock time", how);
 }
 
 static ALBoolFn ALOrigRingDidAppear;
@@ -784,12 +840,12 @@ static ALBoolFn ALOrigRingDidDisappear;
 static void ALRingDidDisappear(UIViewController *self, SEL sel, BOOL animated) {
     ALOrigRingDidDisappear(self, sel, animated);
     // Only when it is really going away. An ad or another screen shown on top doesn't count.
-    if (ALIsRealRing(self) && (self.isBeingDismissed || self.isMovingFromParentViewController)) ALRingEnded();
+    if (ALIsRealRing(self) && (self.isBeingDismissed || self.isMovingFromParentViewController)) ALRingEnded(@"ringing screen closed");
 }
 
 static ALDeallocFn ALOrigRingDealloc;
 static void ALRingDealloc(__unsafe_unretained id self, SEL sel) {
-    if (ALIsRealRing(self)) ALRingEnded();
+    if (ALIsRealRing(self)) ALRingEnded(@"ringing screen released");
     ALOrigRingDealloc(self, sel);
 }
 
