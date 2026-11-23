@@ -86,6 +86,11 @@ NSDate *ALMissionsOpenAt(NSDate *ringStart, NSInteger delayMinutes, NSDate *now)
     return [now compare:end] == NSOrderedAscending ? end : nil;
 }
 
+BOOL ALMissedAlarm(NSDate *due, NSDate *lastRingSeen, NSDate *now) {
+    if (!due || [now timeIntervalSinceDate:due] < 120) return NO;
+    return !lastRingSeen || [lastRingSeen timeIntervalSinceDate:due] < -60;
+}
+
 /// Boot IDs match, counting "unavailable" on both sides as a match so a phone that won't say
 /// still gets a working clock check (falling back to the uptime check).
 static BOOL ALSameBootID(NSString *a, NSString *b) {

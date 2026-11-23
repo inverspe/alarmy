@@ -4,8 +4,14 @@
 //   missions were done) opens it, until the chosen hours before the next alarm.
 // - Mission delay: for a chosen number of minutes after an alarm goes off, the ringing screen is
 //   covered, so the alarm keeps ringing and the missions can't start yet.
+//
+// While Alarmy is in the background the add-on does no work of its own: no timers and no reading of
+// Alarmy's alarms. It only notes events iOS tells it about in a small log.
 #import <UIKit/UIKit.h>
+#import <AVFoundation/AVFoundation.h>
+#import <UserNotifications/UserNotifications.h>
 #import <objc/runtime.h>
+#import <stdatomic.h>
 #import <sys/sysctl.h>
 #import <time.h>
 #import "LockRules.h"
@@ -29,6 +35,12 @@ static NSString *const ALKeyRinging = @"AlarmLock.ringing";
 /// For the lock screen: when the ringing screen last appeared, and when an alarm was last finished.
 static NSString *const ALKeyLastRingAt = @"AlarmLock.lastRingAt";
 static NSString *const ALKeyLastFinishedAt = @"AlarmLock.lastFinishedAt";
+/// For the log: the alarm expected when Alarmy was last left, when the ringing screen was last seen,
+/// and what this run of the app was last known to be doing.
+static NSString *const ALKeyExpected = @"AlarmLock.expectedAlarm";
+static NSString *const ALKeyRingSeen = @"AlarmLock.ringScreenSeen";
+static NSString *const ALKeyRunState = @"AlarmLock.runState";
+static NSString *const ALKeyRunBoot = @"AlarmLock.runBoot";
 
 static NSUserDefaults *ALDefaults(void) { return NSUserDefaults.standardUserDefaults; }
 static BOOL ALLockOn(void) { return [ALDefaults() boolForKey:ALKeyOn]; }
@@ -103,6 +115,115 @@ static NSString *ALDayAndTime(NSDate *date) {
     return [formatter stringFromDate:date];
 }
 
+#pragma mark - Idle in the background
+
+static atomic_bool ALInBackground;
+
+/// Alarmy is in the background, so the add-on must not do any work.
+static BOOL ALIdle(void) {
+#ifdef ALTEST_NO_IDLE
+    return NO; // only for checking that the tests notice background work
+#else
+    return atomic_load(&ALInBackground);
+#endif
+}
+
+static void ALSetBackground(BOOL background) { atomic_store(&ALInBackground, background); }
+
+#ifdef ALTEST
+int ALRefreshCount;
+#endif
+
+#pragma mark - The log
+
+static const NSUInteger ALLogMax = 64 * 1024;
+
+static NSString *ALLogPath(void) {
+    NSString *library = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
+    return [library stringByAppendingPathComponent:@"AlarmLock.log"];
+}
+
+/// One line, written straight away so it survives Alarmy being shut down.
+static void ALEvent(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
+static void ALEvent(NSString *format, ...) {
+    va_list args;
+    va_start(args, format);
+    NSString *text = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
+    ALLog(@"%@", text);
+    @synchronized (@"AlarmLock.log") {
+        @try {
+            static NSDateFormatter *formatter;
+            if (!formatter) {
+                formatter = [NSDateFormatter new];
+                formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+                formatter.dateFormat = @"MM-dd HH:mm:ss";
+            }
+            NSString *path = ALLogPath();
+            NSData *line = [[NSString stringWithFormat:@"%@ %@\n", [formatter stringFromDate:[NSDate date]], text]
+                            dataUsingEncoding:NSUTF8StringEncoding];
+            NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:path];
+            if (!file) {
+                // Readable and writable with the phone locked, after it has been unlocked once.
+                [NSFileManager.defaultManager createFileAtPath:path contents:line
+                    attributes:@{ NSFileProtectionKey: NSFileProtectionCompleteUntilFirstUserAuthentication }];
+                return;
+            }
+            [file seekToEndOfFile];
+            [file writeData:line];
+            unsigned long long size = file.offsetInFile;
+            [file closeFile];
+            if (size > ALLogMax) {
+                NSData *all = [NSData dataWithContentsOfFile:path];
+                if (all.length > ALLogMax / 2) {
+                    [[all subdataWithRange:NSMakeRange(all.length - ALLogMax / 2, ALLogMax / 2)] writeToFile:path atomically:YES];
+                }
+            }
+        } @catch (NSException *e) {
+            ALLog(@"couldn't write the log: %@", e.reason);
+        }
+    }
+}
+
+static void ALCopyLog(void) {
+    NSData *data = [NSData dataWithContentsOfFile:ALLogPath()];
+    // Cutting the log can split a character, so fall back to a reading that can't fail.
+    NSString *text = data ? ([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]
+                             ?: [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding]) : nil;
+    UIPasteboard.generalPasteboard.string = text ?: @"The log is empty.";
+}
+
+static NSString *ALStamp(NSDate *date) {
+    static NSDateFormatter *formatter;
+    if (!formatter) {
+        formatter = [NSDateFormatter new];
+        formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+        formatter.dateFormat = @"MM-dd HH:mm:ss";
+    }
+    return date ? [formatter stringFromDate:date] : @"unknown";
+}
+
+/// What iOS says is waiting to go off, asked once when Alarmy is left or opened.
+static void ALNoteNotifications(NSString *when) {
+    UNUserNotificationCenter *center = UNUserNotificationCenter.currentNotificationCenter;
+    [center getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings *s) {
+        ALEvent(@"%@: notifications allowed=%ld sound=%ld lock screen=%ld time sensitive=%ld", when, (long)s.authorizationStatus,
+                (long)s.soundSetting, (long)s.lockScreenSetting, (long)s.timeSensitiveSetting);
+    }];
+    [center getPendingNotificationRequestsWithCompletionHandler:^(NSArray<UNNotificationRequest *> *requests) {
+        NSDate *first = nil;
+        NSUInteger withSound = 0;
+        for (UNNotificationRequest *request in requests) {
+            if (request.content.sound) withSound += 1;
+            id trigger = request.trigger;
+            NSDate *date = [trigger respondsToSelector:@selector(nextTriggerDate)] ? [trigger nextTriggerDate] : nil;
+            if (date && (!first || [date compare:first] == NSOrderedAscending)) first = date;
+        }
+        ALEvent(@"%@: %lu notifications waiting, %lu with sound, first at %@", when, (unsigned long)requests.count,
+                (unsigned long)withSound, ALStamp(first));
+    }];
+}
+
 #pragma mark - Reading Alarmy's alarms
 
 // Alarmy keeps its alarms in a Realm database. The add-on remembers the settings Alarmy opens it
@@ -136,6 +257,9 @@ static const NSUInteger ALMaxConfigs = 8;
 
 static void ALNoteRealm(id realm) {
     if (!realm) return;
+    if (ALIdle()) {
+        @synchronized (ALConfigLock) { if (ALAlarmConfigs.count > 0) return; }
+    }
     @try {
         id config = [(id<ALRealmLike>)realm configuration];
         NSString *path = [(id<ALConfigLike>)config fileURL].path;
@@ -241,7 +365,11 @@ static NSArray<ALAlarmRecord *> *ALReadAlarms(void) {
     NSString *problem = nil;
     NSUInteger readable = 0;
     for (id config in configs) {
-        NSArray<ALAlarmRecord *> *alarms = ALReadAlarmsIn(realmClass, config, &problem);
+        NSArray<ALAlarmRecord *> *alarms;
+        NSString *failure = nil;
+        // The pool lets go of the database as soon as it has been read.
+        @autoreleasepool { alarms = ALReadAlarmsIn(realmClass, config, &failure); }
+        if (failure) problem = failure;
         if (!alarms) continue;
         readable += 1;
         [all addObjectsFromArray:alarms];
@@ -262,6 +390,7 @@ static NSDate *ALCachedAt;
 
 /// The next alarm, read again at most every 15 seconds.
 static NSDate *ALNextAlarmAt(NSDate *now, BOOL fresh) {
+    if (ALIdle()) return ALCachedNext;
     if (!fresh && ALCachedAt && fabs([now timeIntervalSinceDate:ALCachedAt]) < 15) return ALCachedNext;
     NSArray<ALAlarmRecord *> *alarms = ALReadAlarms();
     ALCachedNext = alarms ? ALNextAlarm(alarms, now, NSCalendar.currentCalendar) : nil;
@@ -343,14 +472,35 @@ static const NSTimeInterval ALRingGoneAfter = 15;
     _host = host;
     _shown = (ALLockState)-1;
     [self build];
-    __weak ALLockUI *weakSelf = self;
-    _timer = [NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer) {
-        [weakSelf refresh:NO];
-    }];
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(becameActive)
-                                               name:UIApplicationDidBecomeActiveNotification object:nil];
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserver:self selector:@selector(wentToBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [center addObserver:self selector:@selector(cameBack) name:UIApplicationWillEnterForegroundNotification object:nil];
+    [center addObserver:self selector:@selector(cameBack) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [self startTimer];
     [self refresh:YES];
     return self;
+}
+
+- (void)startTimer {
+    if (_timer || ALIdle()) return;
+    __weak ALLockUI *weakSelf = self;
+    _timer = [NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer) {
+        if (ALIdle()) [weakSelf stopTimer];
+        else [weakSelf refresh:NO];
+    }];
+}
+
+- (void)stopTimer {
+    [_timer invalidate];
+    _timer = nil;
+}
+
+- (void)wentToBackground {
+    ALSetBackground(YES);
+    if (!ALIdle()) return;
+    [_timer invalidate];
+    _timer = nil;
+    _clearSince = nil;
 }
 
 - (void)dealloc {
@@ -358,7 +508,9 @@ static const NSTimeInterval ALRingGoneAfter = 15;
     [NSNotificationCenter.defaultCenter removeObserver:self];
 }
 
-- (void)becameActive {
+- (void)cameBack {
+    ALSetBackground(NO);
+    [self startTimer];
     [self refresh:YES];
 }
 
@@ -396,7 +548,13 @@ static const NSTimeInterval ALRingGoneAfter = 15;
     _note.textAlignment = NSTextAlignmentCenter;
     _note.numberOfLines = 0;
 
-    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[icon, _title, _body, _note]];
+    UIButton *copy = [UIButton buttonWithType:UIButtonTypeSystem];
+    [copy setTitle:@"Copy log" forState:UIControlStateNormal];
+    copy.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    copy.tintColor = [UIColor colorWithWhite:1 alpha:0.7];
+    [copy addTarget:self action:@selector(copyLog) forControlEvents:UIControlEventTouchUpInside];
+
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[icon, _title, _body, _note, copy]];
     stack.axis = UILayoutConstraintAxisVertical;
     stack.spacing = 18;
     stack.translatesAutoresizingMaskIntoConstraints = NO;
@@ -468,7 +626,10 @@ static const NSTimeInterval ALRingGoneAfter = 15;
 }
 
 - (void)refresh:(BOOL)fresh {
-    if (!_host) return;
+    if (!_host || ALIdle()) return;
+#ifdef ALTEST
+    ALRefreshCount += 1;
+#endif
     NSDate *now = ALNow();
     [self noticeRingGone:now];
     ALLockState state = ALStateAt(now, fresh);
@@ -530,6 +691,11 @@ static const NSTimeInterval ALRingGoneAfter = 15;
     return top;
 }
 
+- (void)copyLog {
+    ALCopyLog();
+    [[UINotificationFeedbackGenerator new] notificationOccurred:UINotificationFeedbackTypeSuccess];
+}
+
 /// Settings can only be changed while the lock is off or open.
 - (BOOL)canChange {
     ALLockState state = ALStateAt(ALNow(), YES);
@@ -574,6 +740,9 @@ static const NSTimeInterval ALRingGoneAfter = 15;
     [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Mission delay: %@", ALDelayText(ALDelay())]
                                               style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self chooseDelay];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy log" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self copyLog];
     }]];
     if (on) {
         [sheet addAction:[UIAlertAction actionWithTitle:@"Turn the lock off" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
@@ -647,16 +816,45 @@ static const NSTimeInterval ALRingGoneAfter = 15;
     if (!(self = [super init])) return nil;
     _host = host;
     [self build];
-    __weak ALHoldUI *weakSelf = self;
-    _timer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) {
-        [weakSelf refresh];
-    }];
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserver:self selector:@selector(wentToBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [center addObserver:self selector:@selector(cameBack) name:UIApplicationWillEnterForegroundNotification object:nil];
+    [center addObserver:self selector:@selector(cameBack) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [self startTimer];
     [self refresh];
     return self;
 }
 
 - (void)dealloc {
     [_timer invalidate];
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+}
+
+- (void)startTimer {
+    if (_timer || !_cover || ALIdle()) return;
+    __weak ALHoldUI *weakSelf = self;
+    _timer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) {
+        if (ALIdle()) [weakSelf stopTimer];
+        else [weakSelf refresh];
+    }];
+}
+
+- (void)stopTimer {
+    [_timer invalidate];
+    _timer = nil;
+}
+
+- (void)wentToBackground {
+    ALSetBackground(YES);
+    if (!ALIdle()) return;
+    [_timer invalidate];
+    _timer = nil;
+}
+
+- (void)cameBack {
+    ALSetBackground(NO);
+    [self startTimer];
+    [self refresh];
 }
 
 - (void)build {
@@ -704,6 +902,7 @@ static const NSTimeInterval ALRingGoneAfter = 15;
 }
 
 - (void)refresh {
+    if (!_cover) return;
     UIViewController *host = _host;
     NSDate *now = ALNow();
     NSDate *open = ALMissionsOpenAt(ALDateFor(ALKeyRingStart), ALDelay(), now);
@@ -795,6 +994,7 @@ static BOOL ALIsRealRing(__unsafe_unretained id controller) {
 static void ALRingStarted(UIViewController *container) {
     NSDate *now = ALNow();
     ALLiveRing = container;
+    ALSetDate(ALKeyRingSeen, now);
     if (![ALDefaults() boolForKey:ALKeyRinging]) ALSetDate(ALKeyLastRingAt, now);
     [ALDefaults() setBool:YES forKey:ALKeyRinging];
     ALSetDate(ALKeyDoneAt, nil);
@@ -804,11 +1004,11 @@ static void ALRingStarted(UIViewController *container) {
     NSDate *start = ALDateFor(ALKeyRingStart);
     NSTimeInterval age = start ? [now timeIntervalSinceDate:start] : -1;
     if (!start || age < -60 || age > ALRingStartKeep) {
-        NSArray<ALAlarmRecord *> *alarms = ALReadAlarms();
+        NSArray<ALAlarmRecord *> *alarms = ALIdle() ? nil : ALReadAlarms();
         start = (alarms ? ALRingStart(alarms, now) : nil) ?: now;
         ALSetDate(ALKeyRingStart, start);
     }
-    ALLog(@"alarm ringing, lock closed, went off at %@", ALTime(start));
+    ALEvent(@"RINGING SCREEN appeared%@, alarm went off at %@", ALIdle() ? @" (in the background)" : @"", ALStamp(start));
 
     if (ALMissionsOpenAt(start, ALDelay(), now) && !objc_getAssociatedObject(container, ALHoldKey)) {
         ALHoldUI *hold = [[ALHoldUI alloc] initWithHost:container];
@@ -827,7 +1027,7 @@ static void ALRingEnded(NSString *how) {
     ALSetDate(ALKeyLastFinishedAt, now);
     ALSetDate(ALKeyActivity, now);
     ALSetDate(ALKeyRingStart, nil);
-    ALLog(@"alarm finished (%@), lock open until the next alarm's lock time", how);
+    ALEvent(@"alarm finished (%@)", how);
 }
 
 static ALBoolFn ALOrigRingDidAppear;
@@ -849,8 +1049,70 @@ static void ALRingDealloc(__unsafe_unretained id self, SEL sel) {
     ALOrigRingDealloc(self, sel);
 }
 
+/// Events iOS reports anyway. Nothing here runs on its own.
+static void ALWatchLifecycle(void) {
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    void (^on)(NSString *, void (^)(NSNotification *)) = ^(NSString *name, void (^block)(NSNotification *)) {
+        [center addObserverForName:name object:nil queue:nil usingBlock:block];
+    };
+    void (^state)(NSString *) = ^(NSString *value) {
+        [ALDefaults() setObject:[NSString stringWithFormat:@"%@ at %@", value, ALStamp([NSDate date])] forKey:ALKeyRunState];
+        [ALDefaults() setObject:(ALBootID() ?: @"") forKey:ALKeyRunBoot];
+    };
+
+    on(UIApplicationDidFinishLaunchingNotification, ^(NSNotification *n) {
+        BOOL background = UIApplication.sharedApplication.applicationState == UIApplicationStateBackground;
+        atomic_store(&ALInBackground, background);
+        NSString *before = [ALDefaults() stringForKey:ALKeyRunState];
+        BOOL restarted = ![([ALDefaults() stringForKey:ALKeyRunBoot] ?: @"") isEqualToString:(ALBootID() ?: @"")];
+        ALEvent(@"---- Alarmy started%@, iOS %@, Alarmy %@", background ? @" (not on screen yet)" : @"", UIDevice.currentDevice.systemVersion,
+                NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"]);
+        if (before) ALEvent(@"last run: %@%@", before, restarted ? @", and the phone has been restarted since" : @"");
+        state(@"started");
+    });
+    on(UIApplicationWillEnterForegroundNotification, ^(NSNotification *n) {
+        atomic_store(&ALInBackground, NO);
+    });
+    on(UIApplicationDidBecomeActiveNotification, ^(NSNotification *n) {
+        atomic_store(&ALInBackground, NO);
+        ALEvent(@"opened, volume %.2f", AVAudioSession.sharedInstance.outputVolume);
+        state(@"open");
+        NSDate *due = ALDateFor(ALKeyExpected);
+        // A moment for Alarmy to bring up its ringing screen first.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            if (ALMissedAlarm(due, ALDateFor(ALKeyRingSeen), [NSDate date])) {
+                ALEvent(@"MISSED: an alarm was due at %@ and its ringing screen never appeared", ALStamp(due));
+                ALSetDate(ALKeyExpected, nil);
+            }
+        });
+    });
+    on(UIApplicationDidEnterBackgroundNotification, ^(NSNotification *n) {
+        NSDate *next = ALCachedNext;
+        atomic_store(&ALInBackground, YES);
+        ALSetDate(ALKeyExpected, next);
+        ALEvent(@"left, next alarm %@, lock %@, volume %.2f", ALStamp(next), ALLockOn() ? @"on" : @"off",
+                AVAudioSession.sharedInstance.outputVolume);
+        state(@"left (in the background)");
+        ALNoteNotifications(@"left");
+    });
+    on(UIApplicationWillTerminateNotification, ^(NSNotification *n) {
+        ALEvent(@"closing, iOS gave notice");
+        state(@"closed with notice");
+    });
+    on(UIApplicationDidReceiveMemoryWarningNotification, ^(NSNotification *n) {
+        ALEvent(@"iOS is short of memory%@", ALIdle() ? @" (in the background)" : @"");
+    });
+    on(AVAudioSessionInterruptionNotification, ^(NSNotification *n) {
+        ALEvent(@"sound interrupted: %@", [n.userInfo[AVAudioSessionInterruptionTypeKey] integerValue] == AVAudioSessionInterruptionTypeBegan ? @"began" : @"ended");
+    });
+    on(AVAudioSessionMediaServicesWereResetNotification, ^(NSNotification *n) {
+        ALEvent(@"iOS restarted its sound system");
+    });
+}
+
 __attribute__((constructor)) static void ALStart(void) {
     @autoreleasepool {
+        ALWatchLifecycle();
         ALConfigLock = [NSObject new];
         ALAlarmConfigs = [NSMutableDictionary dictionary];
 

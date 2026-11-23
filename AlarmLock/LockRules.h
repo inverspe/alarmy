@@ -57,6 +57,10 @@ NSDate *_Nullable ALRingStart(NSArray<ALAlarmRecord *> *alarms, NSDate *now);
 /// they're available (no delay, delay over, or a start that makes no sense for `now`).
 NSDate *_Nullable ALMissionsOpenAt(NSDate *_Nullable ringStart, NSInteger delayMinutes, NSDate *now);
 
+/// An alarm was due at `due` and its ringing screen was never seen: more than 2 minutes have passed
+/// and the screen last appeared (if ever) before the alarm was due.
+BOOL ALMissedAlarm(NSDate *_Nullable due, NSDate *_Nullable lastRingSeen, NSDate *now);
+
 /// "Now" that ignores changes to the phone's clock until the next restart. `anchor` holds an
 /// earlier reading: wall (seconds since 1970), mono (seconds of CLOCK_MONOTONIC), boot.
 NSDate *ALTrustedNow(NSDate *wall, double mono, NSString *_Nullable boot, NSDictionary *_Nullable anchor);

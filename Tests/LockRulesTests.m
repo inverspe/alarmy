@@ -84,6 +84,17 @@ static void testRingStart(void) {
     CHECK(ALRingStart(@[], now) == nil, "no alarms");
 }
 
+static void testMissedAlarm(void) {
+    NSDate *due = D(@"2026-11-23 21:00");
+    CHECK(ALMissedAlarm(due, nil, D(@"2026-11-23 21:30")), "due and never seen");
+    CHECK(ALMissedAlarm(due, D(@"2026-11-23 07:00"), D(@"2026-11-23 21:30")), "only an earlier ring was seen");
+    CHECK(!ALMissedAlarm(due, D(@"2026-11-23 21:00"), D(@"2026-11-23 21:30")), "it rang");
+    CHECK(!ALMissedAlarm(due, D(@"2026-11-23 21:20"), D(@"2026-11-23 21:30")), "its screen was seen late");
+    CHECK(!ALMissedAlarm(due, nil, D(@"2026-11-23 21:01")), "too soon to say");
+    CHECK(!ALMissedAlarm(due, nil, D(@"2026-11-23 20:00")), "not due yet");
+    CHECK(!ALMissedAlarm(nil, nil, D(@"2026-11-23 21:30")), "no alarm known");
+}
+
 static void testNextAlarm(void) {
     NSDate *now = D(@"2026-10-21 12:00");
     NSArray *alarms = @[
@@ -133,6 +144,7 @@ int main(void) {
         testOpenAfterAlarm();
         testMissionDelay();
         testRingStart();
+        testMissedAlarm();
         testNextAlarm();
         testTrustedClock();
     }
