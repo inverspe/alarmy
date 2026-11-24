@@ -39,8 +39,6 @@ ALLockState ALLockStateAt(BOOL lockOn, NSDate *_Nullable openUntil, BOOL noAlarm
 @property (nonatomic) BOOL enabled;
 @property (nonatomic, nullable) NSDate *nextFireDate;
 @property (nonatomic, nullable) NSDate *lastFiredDate;
-/// Its sound settings, for the log.
-@property (nonatomic, nullable, copy) NSString *detail;
 @property (nonatomic) NSInteger hour;
 @property (nonatomic) NSInteger minute;
 + (instancetype)enabled:(BOOL)enabled next:(nullable NSDate *)next hour:(NSInteger)hour minute:(NSInteger)minute;

@@ -9,7 +9,6 @@
 // Alarmy's alarms. It only notes events iOS tells it about in a small log.
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
-#import <MetricKit/MetricKit.h>
 #import <UserNotifications/UserNotifications.h>
 #import <objc/runtime.h>
 #import <stdatomic.h>
@@ -42,7 +41,6 @@ static NSString *const ALKeyExpected = @"AlarmLock.expectedAlarm";
 static NSString *const ALKeyRingSeen = @"AlarmLock.ringScreenSeen";
 static NSString *const ALKeyRunState = @"AlarmLock.runState";
 static NSString *const ALKeyRunBoot = @"AlarmLock.runBoot";
-static NSString *const ALKeyCrashSeen = @"AlarmLock.crashReportsSeenUntil";
 
 static NSUserDefaults *ALDefaults(void) { return NSUserDefaults.standardUserDefaults; }
 static BOOL ALLockOn(void) { return [ALDefaults() boolForKey:ALKeyOn]; }
@@ -226,67 +224,6 @@ static void ALNoteNotifications(NSString *when) {
     }];
 }
 
-static void ALNoteSound(NSString *when) {
-    AVAudioSession *session = AVAudioSession.sharedInstance;
-    NSMutableArray<NSString *> *outputs = [NSMutableArray array];
-    for (AVAudioSessionPortDescription *port in session.currentRoute.outputs) [outputs addObject:port.portType];
-    ALEvent(@"sound %@: volume %.2f, category %@, options %lu, to %@, other sound playing %@", when, session.outputVolume,
-            [session.category stringByReplacingOccurrencesOfString:@"AVAudioSessionCategory" withString:@""],
-            (unsigned long)session.categoryOptions, [outputs componentsJoinedByString:@"+"], session.isOtherAudioPlaying ? @"yes" : @"no");
-}
-
-/// Crash and shutdown reports iOS hands to the app. Nothing is sent anywhere.
-@interface ALReports : NSObject <MXMetricManagerSubscriber>
-@end
-@implementation ALReports
-static void ALAddFrames(NSDictionary *frame, NSMutableArray<NSString *> *out) {
-    if (![frame isKindOfClass:NSDictionary.class] || out.count >= 14) return;
-    [out addObject:[NSString stringWithFormat:@"%@+%@", frame[@"binaryName"] ?: @"?", frame[@"offsetIntoBinaryTextSegment"] ?: @"?"]];
-    NSArray *next = frame[@"subFrames"];
-    if ([next isKindOfClass:NSArray.class]) for (NSDictionary *f in next) ALAddFrames(f, out);
-}
-- (void)didReceiveDiagnosticPayloads:(NSArray<MXDiagnosticPayload *> *)payloads {
-    NSDate *seen = ALDateFor(ALKeyCrashSeen), *latest = seen;
-    for (MXDiagnosticPayload *payload in payloads) {
-        if (seen && [payload.timeStampEnd compare:seen] != NSOrderedDescending) continue;
-        if (!latest || [payload.timeStampEnd compare:latest] == NSOrderedDescending) latest = payload.timeStampEnd;
-        for (MXCrashDiagnostic *crash in payload.crashDiagnostics) {
-            ALEvent(@"CRASH REPORT up to %@: type %@ signal %@ reason %@", ALStamp(payload.timeStampEnd), crash.exceptionType, crash.signal,
-                    crash.terminationReason);
-            @try {
-                NSDictionary *tree = [NSJSONSerialization JSONObjectWithData:crash.callStackTree.JSONRepresentation options:0 error:nil];
-                BOOL ours = [[[NSString alloc] initWithData:crash.callStackTree.JSONRepresentation encoding:NSUTF8StringEncoding] containsString:@"AlarmLock"];
-                ALEvent(@"  the add-on appears in it: %@", ours ? @"YES" : @"no");
-                for (NSDictionary *stack in tree[@"callStacks"]) {
-                    if (![stack[@"threadAttributed"] boolValue]) continue;
-                    NSMutableArray<NSString *> *frames = [NSMutableArray array];
-                    for (NSDictionary *f in stack[@"callStackRootFrames"]) ALAddFrames(f, frames);
-                    ALEvent(@"  %@", [frames componentsJoinedByString:@" < "]);
-                }
-            } @catch (NSException *e) { ALEvent(@"  couldn't read its details"); }
-        }
-        if (payload.hangDiagnostics.count) ALEvent(@"HANG REPORTS: %lu", (unsigned long)payload.hangDiagnostics.count);
-        if (payload.cpuExceptionDiagnostics.count) ALEvent(@"TOO MUCH CPU REPORTS: %lu", (unsigned long)payload.cpuExceptionDiagnostics.count);
-    }
-    if (latest) ALSetDate(ALKeyCrashSeen, latest);
-}
-- (void)didReceiveMetricPayloads:(NSArray<MXMetricPayload *> *)payloads {
-    for (MXMetricPayload *payload in payloads) {
-        MXForegroundExitData *f = payload.applicationExitMetrics.foregroundExitData;
-        MXBackgroundExitData *b = payload.applicationExitMetrics.backgroundExitData;
-        if (!f || !b) continue;
-        ALEvent(@"SHUTDOWNS %@ to %@, open: normal %lu crash %lu bad memory %lu frozen %lu memory %lu | background: normal %lu crash %lu bad memory %lu cpu %lu memory %lu pressure %lu locked file %lu task timeout %lu frozen %lu",
-                ALStamp(payload.timeStampBegin), ALStamp(payload.timeStampEnd),
-                (unsigned long)f.cumulativeNormalAppExitCount, (unsigned long)f.cumulativeAbnormalExitCount, (unsigned long)f.cumulativeBadAccessExitCount,
-                (unsigned long)f.cumulativeAppWatchdogExitCount, (unsigned long)f.cumulativeMemoryResourceLimitExitCount,
-                (unsigned long)b.cumulativeNormalAppExitCount, (unsigned long)b.cumulativeAbnormalExitCount, (unsigned long)b.cumulativeBadAccessExitCount,
-                (unsigned long)b.cumulativeCPUResourceLimitExitCount, (unsigned long)b.cumulativeMemoryResourceLimitExitCount,
-                (unsigned long)b.cumulativeMemoryPressureExitCount, (unsigned long)b.cumulativeSuspendedWithLockedFileExitCount,
-                (unsigned long)b.cumulativeBackgroundTaskAssertionTimeoutExitCount, (unsigned long)b.cumulativeAppWatchdogExitCount);
-    }
-}
-@end
-
 #pragma mark - Reading Alarmy's alarms
 
 // Alarmy keeps its alarms in a Realm database. The add-on remembers the settings Alarmy opens it
@@ -348,6 +285,7 @@ typedef id (*ALOpenOneFn)(id, SEL, id, NSError *__autoreleasing *);
 typedef void (*ALVoidFn)(id, SEL);
 typedef void (*ALBoolFn)(id, SEL, BOOL);
 typedef UIView *(*ALHitTestFn)(id, SEL, CGPoint, UIEvent *);
+typedef void (*ALDeallocFn)(__unsafe_unretained id, SEL);
 
 static ALOpenTwoFn ALOrigOpenQueue;
 static id ALOpenQueue(id cls, SEL sel, id config, id queue, NSError *__autoreleasing *error) {
@@ -385,19 +323,6 @@ static NSDate *ALDateValue(id object, NSString *key) {
     }
 }
 
-static NSString *ALAlarmDetail(id object) {
-    NSMutableArray<NSString *> *parts = [NSMutableArray array];
-    for (NSString *key in @[@"volume", @"vibrate", @"isCrescendoEnable", @"crescendoDuration"]) {
-        @try {
-            id value = [object valueForKey:key];
-            if (value) [parts addObject:[NSString stringWithFormat:@"%@=%@", key, value]];
-        } @catch (__unused NSException *e) {} // a field this version doesn't have
-    }
-    return [parts componentsJoinedByString:@" "];
-}
-
-static NSArray<ALAlarmRecord *> *ALLastAlarms;
-
 /// The alarms in one database file. Nil when it can't be read; `problem` then says why.
 static NSArray<ALAlarmRecord *> *ALReadAlarmsIn(Class realmClass, id config, NSString **problem) {
     @try {
@@ -417,7 +342,6 @@ static NSArray<ALAlarmRecord *> *ALReadAlarmsIn(Class realmClass, id config, NSS
                                                      hour:[[object valueForKey:@"hour"] integerValue]
                                                    minute:[[object valueForKey:@"minute"] integerValue]];
             alarm.lastFiredDate = ALDateValue(object, @"lastFiredDate");
-            alarm.detail = ALAlarmDetail(object);
             [alarms addObject:alarm];
         }
         return alarms;
@@ -458,7 +382,6 @@ static NSArray<ALAlarmRecord *> *ALReadAlarms(void) {
                      (unsigned long)readable, readable == 1 ? @"" : @"s"];
     ALReadProblem = on == 0 ? @"No alarms that are on were found." : nil;
     ALNoAlarmsOn = on == 0;
-    ALLastAlarms = all;
     return all;
 }
 
@@ -1068,25 +991,6 @@ static BOOL ALIsRealRing(__unsafe_unretained id controller) {
 
 /// A ring has started: the lock closes again at once, so snoozing can't be used to get in, and the
 /// mission delay counts from when the alarm went off.
-/// Says the ringing screen has been destroyed, without touching how Alarmy destroys it.
-@interface ALReleaseNote : NSObject
-@end
-@implementation ALReleaseNote
-- (void)dealloc { ALRingEnded(@"ringing screen released"); }
-@end
-
-static const void *ALReleaseKey = &ALReleaseKey;
-static BOOL ALNotingRing;
-
-/// Only while an alarm is ringing: one log line a minute, so the log shows when Alarmy stopped.
-static void ALNoteWhileRinging(NSInteger minute) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        if (![ALDefaults() boolForKey:ALKeyRinging] || minute > 60) { ALNotingRing = NO; return; }
-        ALNoteSound([NSString stringWithFormat:@"%ld min into the ring%@", (long)minute, ALIdle() ? @" (in the background)" : @""]);
-        ALNoteWhileRinging(minute + 1);
-    });
-}
-
 static void ALRingStarted(UIViewController *container) {
     NSDate *now = ALNow();
     ALLiveRing = container;
@@ -1105,20 +1009,6 @@ static void ALRingStarted(UIViewController *container) {
         ALSetDate(ALKeyRingStart, start);
     }
     ALEvent(@"RINGING SCREEN appeared%@, alarm went off at %@", ALIdle() ? @" (in the background)" : @"", ALStamp(start));
-
-    if (!objc_getAssociatedObject(container, ALReleaseKey)) {
-        objc_setAssociatedObject(container, ALReleaseKey, [ALReleaseNote new], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    if (!ALNotingRing) {
-        ALNotingRing = YES;
-        ALNoteSound(@"at the start");
-        for (NSNumber *after in @[@3, @10, @30]) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, after.intValue * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-                if ([ALDefaults() boolForKey:ALKeyRinging]) ALNoteSound([NSString stringWithFormat:@"%@ s later", after]);
-            });
-        }
-        ALNoteWhileRinging(1);
-    }
 
     if (ALMissionsOpenAt(start, ALDelay(), now) && !objc_getAssociatedObject(container, ALHoldKey)) {
         ALHoldUI *hold = [[ALHoldUI alloc] initWithHost:container];
@@ -1149,13 +1039,14 @@ static void ALRingDidAppear(UIViewController *self, SEL sel, BOOL animated) {
 static ALBoolFn ALOrigRingDidDisappear;
 static void ALRingDidDisappear(UIViewController *self, SEL sel, BOOL animated) {
     ALOrigRingDidDisappear(self, sel, animated);
-    if (ALIsRealRing(self)) {
-        ALEvent(@"ringing screen went out of view: dismissed=%d removed=%d parent=%d presenter=%d window=%d", self.isBeingDismissed,
-                self.isMovingFromParentViewController, self.parentViewController != nil, self.presentingViewController != nil,
-                self.viewIfLoaded.window != nil);
-    }
     // Only when it is really going away. An ad or another screen shown on top doesn't count.
     if (ALIsRealRing(self) && (self.isBeingDismissed || self.isMovingFromParentViewController)) ALRingEnded(@"ringing screen closed");
+}
+
+static ALDeallocFn ALOrigRingDealloc;
+static void ALRingDealloc(__unsafe_unretained id self, SEL sel) {
+    if (ALIsRealRing(self)) ALRingEnded(@"ringing screen released");
+    ALOrigRingDealloc(self, sel);
 }
 
 /// Events iOS reports anyway. Nothing here runs on its own.
@@ -1178,12 +1069,6 @@ static void ALWatchLifecycle(void) {
                 NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"]);
         if (before) ALEvent(@"last run: %@%@", before, restarted ? @", and the phone has been restarted since" : @"");
         state(@"started");
-        static ALReports *reports;
-        reports = [ALReports new];
-        [MXMetricManager.sharedManager addSubscriber:reports];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            [reports didReceiveDiagnosticPayloads:MXMetricManager.sharedManager.pastDiagnosticPayloads];
-        });
     });
     on(UIApplicationWillEnterForegroundNotification, ^(NSNotification *n) {
         atomic_store(&ALInBackground, NO);
@@ -1207,9 +1092,6 @@ static void ALWatchLifecycle(void) {
         ALSetDate(ALKeyExpected, next);
         ALEvent(@"left, next alarm %@, lock %@, volume %.2f", ALStamp(next), ALLockOn() ? @"on" : @"off",
                 AVAudioSession.sharedInstance.outputVolume);
-        for (ALAlarmRecord *alarm in ALLastAlarms) {
-            if (alarm.enabled) ALEvent(@"  alarm %02ld:%02ld %@", (long)alarm.hour, (long)alarm.minute, alarm.detail ?: @"");
-        }
         state(@"left (in the background)");
         ALNoteNotifications(@"left");
     });
@@ -1221,10 +1103,7 @@ static void ALWatchLifecycle(void) {
         ALEvent(@"iOS is short of memory%@", ALIdle() ? @" (in the background)" : @"");
     });
     on(AVAudioSessionInterruptionNotification, ^(NSNotification *n) {
-        ALEvent(@"sound interrupted: %@, reason %@, may resume %@%@",
-                [n.userInfo[AVAudioSessionInterruptionTypeKey] integerValue] == AVAudioSessionInterruptionTypeBegan ? @"began" : @"ended",
-                n.userInfo[AVAudioSessionInterruptionReasonKey] ?: @"none", n.userInfo[AVAudioSessionInterruptionOptionKey] ?: @"none",
-                ALIdle() ? @" (in the background)" : @"");
+        ALEvent(@"sound interrupted: %@", [n.userInfo[AVAudioSessionInterruptionTypeKey] integerValue] == AVAudioSessionInterruptionTypeBegan ? @"began" : @"ended");
     });
     on(AVAudioSessionMediaServicesWereResetNotification, ^(NSNotification *n) {
         ALEvent(@"iOS restarted its sound system");
@@ -1260,6 +1139,7 @@ __attribute__((constructor)) static void ALStart(void) {
         if (ring) {
             ALOrigRingDidAppear = (ALBoolFn)ALReplace(ring, @selector(viewDidAppear:), (IMP)ALRingDidAppear);
             ALOrigRingDidDisappear = (ALBoolFn)ALReplace(ring, @selector(viewDidDisappear:), (IMP)ALRingDidDisappear);
+            ALOrigRingDealloc = (ALDeallocFn)ALReplace(ring, NSSelectorFromString(@"dealloc"), (IMP)ALRingDealloc);
         } else {
             ALLog(@"no ringing screen class, the lock won't open after alarms");
         }

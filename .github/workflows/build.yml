@@ -2,7 +2,7 @@ name: alarmlock
 
 on:
   push:
-    branches: [alarmy-lock]
+    branches: [alarmlock-probe]
 
 permissions:
   contents: read
