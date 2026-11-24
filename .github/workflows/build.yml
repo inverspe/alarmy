@@ -28,7 +28,7 @@ jobs:
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           xcrun -sdk iphoneos clang -arch arm64 -isysroot "$SDK" -miphoneos-version-min=15.0 \
             -fobjc-arc -Wall -Wno-deprecated-declarations -dynamiclib \
-            -framework Foundation -framework UIKit -framework AVFoundation -framework UserNotifications \
+            -framework Foundation -framework UIKit -framework AVFoundation -framework UserNotifications -framework MetricKit \
             -install_name @rpath/AlarmLock.dylib \
             -o AlarmLock.dylib AlarmLock/AlarmLock.m AlarmLock/LockRules.m 2>&1 | tee build.log
           test -f AlarmLock.dylib

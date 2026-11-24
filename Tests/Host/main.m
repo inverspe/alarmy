@@ -45,41 +45,13 @@ static NSMutableArray<StandInAlarm *> *alarms;
 - (id)allObjects:(NSString *)name { return alarms; }
 @end
 
-#pragma mark - Stand-in screens, under the names the add-on looks for
-
-__attribute__((objc_runtime_name("_TtC6Alarmy18HomeViewController")))
-@interface StandInHome : UIViewController
-@end
-@implementation StandInHome
-- (void)viewDidLoad { [super viewDidLoad]; self.view.backgroundColor = UIColor.darkGrayColor; }
-- (void)viewDidAppear:(BOOL)animated { [super viewDidAppear:animated]; }
-@end
-
-__attribute__((objc_runtime_name("_TtC6Alarmy24AlarmContainerController")))
-@interface StandInRing : UIViewController
-@end
-@implementation StandInRing
-- (void)viewDidAppear:(BOOL)animated { [super viewDidAppear:animated]; }
-- (void)dealloc { printf("     (ringing screen released)\n"); }
-@end
-
-__attribute__((objc_runtime_name("_TtC6Alarmy26PreviewContainerController")))
-@interface StandInPreview : StandInRing
-@end
-@implementation StandInPreview
-@end
-
-__attribute__((objc_runtime_name("_TtC6Alarmy27EmergencyEscapeEntryOverlay")))
-@interface StandInEscape : UIView
-@end
-@implementation StandInEscape
-- (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e { return [super hitTest:p withEvent:e]; }
-@end
+// The stand-in screens are in Screens.swift, as Swift classes with the names the add-on looks for.
+static UIViewController *newScreen(NSString *name) { return [NSClassFromString([@"Alarmy." stringByAppendingString:name]) new]; }
 
 #pragma mark - Helpers
 
 static UIWindow *window;
-static StandInHome *home;
+static UIViewController *home;
 static NSUserDefaults *D(void) { return NSUserDefaults.standardUserDefaults; }
 static void spin(NSTimeInterval s) { [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:s]]; }
 static void post(NSString *name) { [NSNotificationCenter.defaultCenter postNotificationName:name object:UIApplication.sharedApplication]; }
@@ -109,6 +81,8 @@ static void dismiss(void) { [home dismissViewControllerAnimated:NO completion:ni
 static void run(void) {
     StandInAlarm *alarm = [StandInAlarm new];
     alarm.enabled = YES;
+    alarm.hour = 7;
+    alarm.minute = 30;
     alarm.nextFireDate = [NSDate dateWithTimeIntervalSinceNow:3600];
     [alarms addObject:alarm];
     [RLMRealm realmWithConfiguration:[RLMRealmConfiguration new] queue:nil error:nil]; // the app opening its database
@@ -142,7 +116,7 @@ static void run(void) {
     printf("-- an alarm going off in the background\n");
     [D() setInteger:1 forKey:@"AlarmLock.missionDelayMinutes"];
     opens0 = opens;
-    StandInRing *ring = [StandInRing new];
+    UIViewController *ring = newScreen(@"AlarmContainerController");
     present(ring);
     CHECK([D() boolForKey:@"AlarmLock.ringing"], "background ring is noticed");
     CHECK(opens == opens0, "background ring doesn't read the alarms");
@@ -161,7 +135,7 @@ static void run(void) {
 
     printf("-- the countdown ends by itself\n");
     alarm.lastFiredDate = [NSDate dateWithTimeIntervalSinceNow:-56];
-    ring = [StandInRing new];
+    ring = newScreen(@"AlarmContainerController");
     present(ring);
     CHECK(visible(ring.view, @"alarmlock-hold"), "held for the last seconds");
     spin(6);
@@ -169,10 +143,28 @@ static void run(void) {
     dismiss();
     ring = nil;
 
+    printf("-- the ringing screen in its own window, destroyed without being dismissed\n");
+    setDate(@"AlarmLock.alarmDoneAt", nil);
+    @autoreleasepool {
+        UIWindow *own = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+        own.windowLevel = UIWindowLevelAlert;
+        own.rootViewController = newScreen(@"AlarmContainerController");
+        own.hidden = NO;
+        spin(1.5);
+        CHECK([D() boolForKey:@"AlarmLock.ringing"], "its ring is noticed");
+        own.hidden = YES;
+        own.rootViewController = nil;
+        own = nil;
+    }
+    spin(2);
+    CHECK(![D() boolForKey:@"AlarmLock.ringing"], "destroying it ends the ring");
+    CHECK([D() objectForKey:@"AlarmLock.alarmDoneAt"] != nil, "and counts as finished");
+    CHECK([log_() containsString:@"alarm finished (ringing screen released)"], "by the release signal, without a crash");
+
     printf("-- mission previews don't count\n");
     setDate(@"AlarmLock.alarmDoneAt", nil);
     alarm.lastFiredDate = nil;
-    StandInPreview *preview = [StandInPreview new];
+    UIViewController *preview = newScreen(@"PreviewContainerController");
     present(preview);
     CHECK(![D() boolForKey:@"AlarmLock.ringing"], "a preview isn't a ring");
     CHECK(find(preview.view, @"alarmlock-hold") == nil, "a preview isn't held");
@@ -181,7 +173,7 @@ static void run(void) {
     CHECK([D() objectForKey:@"AlarmLock.alarmDoneAt"] == nil, "a preview doesn't unlock");
 
     printf("-- emergency escape\n");
-    StandInEscape *escape = [[StandInEscape alloc] initWithFrame:CGRectMake(0, 0, 50, 50)];
+    UIView *escape = [[NSClassFromString(@"Alarmy.EmergencyEscapeEntryOverlay") alloc] initWithFrame:CGRectMake(0, 0, 50, 50)];
     [window addSubview:escape];
     CHECK(escape.hidden, "hidden while the lock is on");
     [escape removeFromSuperview];
@@ -196,6 +188,9 @@ static void run(void) {
     CHECK([text containsString:@"left, next alarm"], "notes being left");
     CHECK([text containsString:@"notifications waiting"], "notes waiting notifications");
     CHECK([text containsString:@"RINGING SCREEN appeared (in the background)"], "notes a ring in the background");
+    CHECK([text containsString:@"sound at the start: volume"], "notes the sound when ringing");
+    CHECK([text containsString:@"ringing screen went out of view"], "notes how the ringing screen went");
+    CHECK([text containsString:@"  alarm 07:30"], "notes the alarm's settings");
     CHECK([text containsString:@"MISSED: an alarm was due"], "notes a missed alarm");
     printf("---- the log, as you'd copy it\n%s----\n", text.UTF8String);
 
@@ -210,7 +205,7 @@ static void run(void) {
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
     alarms = [NSMutableArray array];
     window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-    home = [StandInHome new];
+    home = newScreen(@"HomeViewController");
     window.rootViewController = home;
     [window makeKeyAndVisible];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{

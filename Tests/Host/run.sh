@@ -18,10 +18,14 @@ cat > "$app/Info.plist" <<EOF
 <key>UILaunchScreen</key><dict/>
 </dict></plist>
 EOF
-xcrun -sdk iphonesimulator clang -arch arm64 -isysroot "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
+sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
+swiftlib=$(dirname "$(xcrun --find swiftc)")/../lib/swift/iphonesimulator
+xcrun -sdk iphonesimulator swiftc -c -parse-as-library -module-name Alarmy -target arm64-apple-ios15.0-simulator -sdk "$sdk" \
+  Tests/Host/Screens.swift -o "build-$name/screens.o"
+xcrun -sdk iphonesimulator clang -arch arm64 -isysroot "$sdk" -L"$swiftlib" -L"$sdk/usr/lib/swift" -Wl,-rpath,/usr/lib/swift \
   -mios-simulator-version-min=15.0 -fobjc-arc -Wno-deprecated-declarations -DALTEST=1 "$@" \
-  -framework Foundation -framework UIKit -framework AVFoundation -framework UserNotifications \
-  -o "$app/Host" Tests/Host/main.m AlarmLock/AlarmLock.m AlarmLock/LockRules.m
+  -framework Foundation -framework UIKit -framework AVFoundation -framework UserNotifications -framework MetricKit \
+  -o "$app/Host" "build-$name/screens.o" Tests/Host/main.m AlarmLock/AlarmLock.m AlarmLock/LockRules.m
 codesign -f -s - "$app"
 xcrun simctl install booted "$app"
 xcrun simctl launch --console-pty booted "com.inverspe.alarmlock.host.$name" > "host-$name.log" 2>&1 || true
