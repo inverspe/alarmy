@@ -99,6 +99,13 @@ static void run(void) {
     CHECK(visible(home.view, @"alarmlock-cover"), "lock on, alarm in an hour: covered");
     CHECK(!visible(home.view, @"alarmlock-pill"), "lock on: no button to change settings");
 
+    printf("-- Alarmy closed during a ring, then started again\n");
+    [D() setBool:YES forKey:@"AlarmLock.ringing"];
+    spin(20);
+    CHECK([D() boolForKey:@"AlarmLock.ringing"], "after a restart, the Alarms tab showing doesn't end the ring");
+    CHECK([D() objectForKey:@"AlarmLock.alarmDoneAt"] == nil, "and doesn't unlock");
+    CHECK(visible(home.view, @"alarmlock-cover"), "so it stays covered");
+
     printf("-- in front, the add-on works (so the next part means something)\n");
     int opens0 = opens, refresh0 = ALRefreshCount;
     spin(20);

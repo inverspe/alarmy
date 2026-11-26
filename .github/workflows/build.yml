@@ -56,6 +56,12 @@ jobs:
           grep -q "^FAIL background: no reading of alarms" host-noidle.log
           grep -q "^FAIL background: no timer" host-noidle.log
 
+      - name: Check the test notices the unlock gap
+        timeout-minutes: 8
+        run: |
+          bash Tests/Host/run.sh gap -DALTEST_NO_RUN_CHECK=1
+          grep -q "^FAIL after a restart, the Alarms tab showing doesn't end the ring" host-gap.log
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

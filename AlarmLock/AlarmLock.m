@@ -521,6 +521,17 @@ static NSString *ALDelayText(NSInteger minutes) {
 static void ALRingEnded(NSString *how);
 /// Alarmy's ringing screen while it exists in this run of the app.
 static __weak UIViewController *ALLiveRing;
+/// This run of Alarmy has shown a ringing screen. If Alarmy was closed during a ring and started
+/// again, that ring didn't end where the add-on could see it, so it must not count as finished.
+static BOOL ALRingSeenThisRun;
+
+static BOOL ALRingOpenInThisRun(void) {
+#ifdef ALTEST_NO_RUN_CHECK
+    return YES; // only for checking that the tests notice the gap
+#else
+    return ALRingSeenThisRun;
+#endif
+}
 /// How long the Alarms tab must be on screen, with no ringing screen up, before a ring counts as over.
 static const NSTimeInterval ALRingGoneAfter = 15;
 
@@ -691,7 +702,7 @@ static const NSTimeInterval ALRingGoneAfter = 15;
 }
 
 - (void)noticeRingGone:(NSDate *)now {
-    if (![ALDefaults() boolForKey:ALKeyRinging] || ![self alarmsTabOnScreen]) {
+    if (![ALDefaults() boolForKey:ALKeyRinging] || !ALRingOpenInThisRun() || ![self alarmsTabOnScreen]) {
         _clearSince = nil;
         return;
     }
@@ -720,7 +731,9 @@ static const NSTimeInterval ALRingGoneAfter = 15;
 
     if (covered) {
         NSDate *done = ALDateFor(ALKeyDoneAt);
-        if ([ALDefaults() boolForKey:ALKeyRinging]) {
+        if ([ALDefaults() boolForKey:ALKeyRinging] && !ALRingSeenThisRun) {
+            _body.text = @"Alarmy was closed while an alarm was ringing, so its missions weren't seen to finish. They unlock once an alarm has rung and you've done its missions.";
+        } else if ([ALDefaults() boolForKey:ALKeyRinging]) {
             _body.text = @"An alarm is ringing or snoozed. They unlock once you've done its missions.";
         } else if (done && next) {
             _body.text = [NSString stringWithFormat:@"Your alarm was finished at %@, but your next alarm at %@ is less than %@ away, so they stay locked until it has rung.",
@@ -1090,6 +1103,7 @@ static void ALNoteWhileRinging(NSInteger minute) {
 static void ALRingStarted(UIViewController *container) {
     NSDate *now = ALNow();
     ALLiveRing = container;
+    ALRingSeenThisRun = YES;
     ALSetDate(ALKeyRingSeen, now);
     if (![ALDefaults() boolForKey:ALKeyRinging]) ALSetDate(ALKeyLastRingAt, now);
     [ALDefaults() setBool:YES forKey:ALKeyRinging];
